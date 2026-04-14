@@ -1,0 +1,6 @@
+{
+  "name": "XAUUSD MT5 Trading MVP",
+  "description": "An execution-first algorithmic trading system for XAUUSD integrating with MetaTrader 5, featuring a straddle strategy and automated risk management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

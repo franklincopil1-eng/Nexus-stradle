@@ -1,0 +1,223 @@
+import { useState, useEffect, useRef } from 'react';
+import { Activity, Shield, AlertTriangle, Terminal, Zap, TrendingUp, TrendingDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface LogEntry {
+  timestamp: string;
+  level: 'INFO' | 'STRATEGY' | 'EXECUTION' | 'ERROR';
+  message: string;
+}
+
+interface Order {
+  ticket: string;
+  type: 'BUY STOP' | 'SELL STOP' | 'BUY' | 'SELL';
+  volume: string;
+  price: string;
+  sl: string;
+  tp: string;
+  status: 'PENDING' | 'OPEN';
+}
+
+export default function App() {
+  const [price, setPrice] = useState(2024.58);
+  const [spread, setSpread] = useState(1.2);
+  const [account, setAccount] = useState({
+    balance: 10000.00,
+    equity: 10000.00,
+    marginFree: 10000.00,
+    floatingPL: 0.00
+  });
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fetchState = async () => {
+      try {
+        const res = await fetch('/api/state');
+        const data = await res.json();
+        setPrice(data.price);
+        setSpread(data.spread);
+        setAccount(data.account);
+        setOrders(data.orders);
+        setLogs(data.logs);
+      } catch (err) {
+        console.error("Failed to fetch state", err);
+      }
+    };
+
+    const interval = setInterval(fetchState, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  return (
+    <div className="flex flex-col h-screen overflow-hidden bg-[#0a0a0b] text-[#e2e2e4]">
+      {/* Header */}
+      <header className="h-[60px] border-b border-[#27272a] flex items-center justify-between px-6 bg-[#151518]">
+        <div className="flex items-center gap-2.5 font-extrabold tracking-[2px]">
+          ATLAS-X 
+          <span className="text-[#71717a] font-light text-xs tracking-normal">// EXECUTION ENGINE</span>
+        </div>
+        <div className="flex gap-8">
+          <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#22c55e]">
+            <div className="w-2 h-2 bg-[#22c55e] rounded-full shadow-[0_0_8px_#22c55e]" />
+            MT5 CONNECTED [DEMO]
+          </div>
+          <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#71717a]">
+            <div className="w-2 h-2 bg-[#71717a] rounded-full" />
+            STRATEGY: STRADDLE_V1_RUNNING
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 grid grid-cols-[320px_1fr_300px] gap-px bg-[#27272a]">
+        {/* Left Pane: Market Data & Account */}
+        <section className="pane">
+          <div>
+            <h3 className="section-title">Market Data: XAUUSD</h3>
+            <div className="flex flex-col items-center justify-center h-[120px] bg-[#151518] rounded border border-[#27272a]">
+              <motion.div 
+                key={price}
+                initial={{ opacity: 0.5 }}
+                animate={{ opacity: 1 }}
+                className="text-[42px] font-mono font-bold"
+              >
+                {price.toFixed(2)}
+              </motion.div>
+              <div className="text-xs text-[#71717a] mt-2">
+                Spread: {spread} pts | Tick: 0.01
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="stat-card">
+              <div className="stat-label">Range High (5m)</div>
+              <div className="stat-value">2026.15</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Range Low (5m)</div>
+              <div className="stat-value">2021.40</div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="section-title">Account Metrics</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="stat-card">
+                <div className="stat-label">Balance</div>
+                <div className="stat-value">${account.balance.toLocaleString()}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Equity</div>
+                <div className="stat-value">${account.equity.toLocaleString()}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Margin Free</div>
+                <div className="stat-value">${account.marginFree.toLocaleString()}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Floating P/L</div>
+                <div className={`stat-value ${account.floatingPL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
+                  ${account.floatingPL.toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Center Pane: Execution Pipeline */}
+        <section className="pane border-x border-[#27272a]">
+          <h3 className="section-title">Live Execution Pipeline</h3>
+          <table className="w-full border-collapse order-table">
+            <thead>
+              <tr>
+                <th>Ticket</th>
+                <th>Type</th>
+                <th>Volume</th>
+                <th>Entry/Price</th>
+                <th>S/L</th>
+                <th>T/P</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((order, idx) => (
+                <tr key={order.ticket} className={order.status === 'OPEN' ? 'bg-white/5' : ''}>
+                  <td>{order.ticket}</td>
+                  <td>
+                    <span className={`badge ${order.type.includes('BUY') ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]'}`}>
+                      {order.type}
+                    </span>
+                  </td>
+                  <td>{order.volume}</td>
+                  <td>{order.price}</td>
+                  <td>{order.sl}</td>
+                  <td>{order.tp}</td>
+                  <td className={order.status === 'OPEN' ? 'text-[#22c55e]' : ''}>{order.status}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
+        {/* Right Pane: Risk & Strategy */}
+        <section className="pane">
+          <h3 className="section-title">Risk & Strategy</h3>
+          <div className="flex flex-col gap-2.5">
+            <button className="btn btn-active">SYSTEM ENGAGED</button>
+            <button className="btn">HALT ALL TRADING</button>
+          </div>
+          
+          <div className="space-y-3">
+            <div className="stat-card">
+              <div className="stat-label">Risk Per Trade</div>
+              <div className="stat-value">1.0% / $100</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Straddle Interval</div>
+              <div className="stat-value">15 min</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Trailing Step</div>
+              <div className="stat-value">25 pts</div>
+            </div>
+          </div>
+
+          <div className="mt-auto p-3 bg-[#eab308]/10 border border-[#eab308] rounded">
+            <div className="stat-label text-[#eab308] flex items-center gap-1.5">
+              <AlertTriangle size={10} /> System Notice
+            </div>
+            <div className="text-[11px] leading-relaxed">
+              Slippage observed on last execution: 0.12 pts. Adjusting buffers.
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* Footer: Log Viewport */}
+      <div className="h-[240px] bg-black border-t border-[#27272a] p-3 font-mono text-[11px] overflow-y-auto text-[#88cc88]">
+        {logs.map((log, idx) => (
+          <div key={idx} className="mb-1 whitespace-nowrap">
+            <span className="text-[#71717a] mr-2">[{log.timestamp}]</span>
+            <span className={`mr-2 ${
+              log.level === 'INFO' ? 'text-white' : 
+              log.level === 'STRATEGY' ? 'text-[#eab308]' : 
+              'text-[#22c55e]'
+            }`}>
+              {log.level}:
+            </span>
+            {log.message}
+          </div>
+        ))}
+        <div ref={logEndRef} />
+      </div>
+    </div>
+  );
+}
