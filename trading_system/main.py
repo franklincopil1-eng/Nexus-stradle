@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import MetaTrader5 as mt5
 from logger import setup_logger
 from mt5_connector import MT5Connector
+from oanda_connector import OandaConnector
 from risk_manager import RiskManager
 from strategy import StraddleStrategy
 
@@ -13,29 +14,60 @@ load_dotenv()
 # Configuration
 SYMBOL = "XAUUSD"
 TIMEFRAME = mt5.TIMEFRAME_M5
-LOOKBACK_CANDLES = 12 # 1 hour if M5
+LOOKBACK_CANDLES = 12 
 OFFSET_POINTS = 50
 FIXED_LOT = 0.01
 SL_POINTS = 200
 TP_POINTS = 400
 TRAILING_STOP_POINTS = 150
-ITERATION_SLEEP = 60 # Check every minute
+ITERATION_SLEEP = 60 
 
 def main():
     logger = setup_logger()
-    logger.info("Starting XAUUSD Trading MVP")
+    logger.info("Starting XAUUSD Trading MVP (Multi-Broker)")
 
-    # Initialize Connector
-    connector = MT5Connector(
-        login=os.getenv("MT5_LOGIN"),
-        password=os.getenv("MT5_PASSWORD"),
-        server=os.getenv("MT5_SERVER"),
-        logger=logger,
-        api_url=os.getenv("API_URL")
-    )
+    brokers = []
 
-    if not connector.connect():
-        logger.error("Failed to connect to MT5. Exiting.")
+    # Helper to add MT5 brokers
+    def add_mt5_broker(prefix, name):
+        login = os.getenv(f"{prefix}_LOGIN")
+        if login:
+            broker = MT5Connector(
+                login=login,
+                password=os.getenv(f"{prefix}_PASSWORD"),
+                server=os.getenv(f"{prefix}_SERVER"),
+                logger=logger,
+                api_url=os.getenv("API_URL")
+            )
+            # Set a custom name for the broker instance
+            broker.name = name
+            if broker.connect():
+                brokers.append(broker)
+            else:
+                logger.warning(f"{name} connection failed, skipping.")
+
+    # Initialize specific MT5 Brokers
+    add_mt5_broker("MT5", "Primary MT5")
+    add_mt5_broker("EXNESS", "Exness Kenya")
+    add_mt5_broker("VALETAX", "Valetax")
+    add_mt5_broker("PEPPERSTONE", "Pepperstone Kenya")
+
+    # Initialize OANDA if credentials exist
+    if os.getenv("OANDA_ACCESS_TOKEN"):
+        oanda_broker = OandaConnector(
+            access_token=os.getenv("OANDA_ACCESS_TOKEN"),
+            account_id=os.getenv("OANDA_ACCOUNT_ID"),
+            environment=os.getenv("OANDA_ENV", "practice"),
+            logger=logger,
+            api_url=os.getenv("API_URL")
+        )
+        if oanda_broker.connect():
+            brokers.append(oanda_broker)
+        else:
+            logger.warning("OANDA connection failed, skipping.")
+
+    if not brokers:
+        logger.error("No brokers connected. Exiting.")
         return
 
     # Initialize Risk Manager
@@ -47,74 +79,95 @@ def main():
         logger=logger
     )
 
-    # Initialize Strategy
-    strategy = StraddleStrategy(
-        connector=connector,
-        risk_manager=risk_manager,
-        symbol=SYMBOL,
-        timeframe=TIMEFRAME,
-        lookback_candles=LOOKBACK_CANDLES,
-        offset_points=OFFSET_POINTS,
-        logger=logger
-    )
+    # Initialize Strategies (one per broker)
+    strategies = []
+    for broker in brokers:
+        strategies.append(StraddleStrategy(
+            connector=broker,
+            risk_manager=risk_manager,
+            symbol=SYMBOL,
+            timeframe=TIMEFRAME,
+            lookback_candles=LOOKBACK_CANDLES,
+            offset_points=OFFSET_POINTS,
+            logger=logger
+        ))
+
+    is_halted = False
 
     try:
         while True:
             logger.info(f"Running iteration at {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
-            # Fetch current state to push to API
-            tick = connector.get_tick(SYMBOL)
-            account_info = mt5.account_info()
-            positions = mt5.positions_get(symbol=SYMBOL)
-            orders = mt5.orders_get(symbol=SYMBOL)
+            # Use the first broker for UI commands and global state for now
+            primary_broker = brokers[0]
+            commands = primary_broker.get_commands()
             
-            # Format orders/positions for the dashboard
+            for cmd in commands:
+                if cmd == "HALT":
+                    is_halted = True
+                    logger.warning("SYSTEM HALTED BY UI")
+                    for broker in brokers:
+                        orders = broker.get_pending_orders(SYMBOL)
+                        for o in orders:
+                            broker.cancel_order(o["ticket"])
+                elif cmd == "RESUME":
+                    is_halted = False
+                    logger.info("SYSTEM RESUMED BY UI")
+                elif cmd == "CLOSE_ALL":
+                    logger.warning("CLOSING ALL POSITIONS BY UI")
+                    for broker in brokers:
+                        positions = broker.get_positions(SYMBOL)
+                        for p in positions:
+                            # Close position by executing opposite market order
+                            side = "SELL" if p["type"] == "BUY" else "BUY"
+                            import MetaTrader5 as mt5
+                            order_type = mt5.ORDER_TYPE_SELL if side == "SELL" else mt5.ORDER_TYPE_BUY
+                            if "Oanda" in broker.__class__.__name__:
+                                order_type = side
+                            broker.execute_order(SYMBOL, order_type, p["volume"], comment="Close All")
+
+            # Update UI with aggregate state
             all_orders = []
-            if positions:
+            total_equity = 0
+            total_profit = 0
+            
+            for broker in brokers:
+                tick = broker.get_tick(SYMBOL)
+                acc = broker.get_account_info()
+                positions = broker.get_positions(SYMBOL)
+                orders = broker.get_pending_orders(SYMBOL)
+                
+                if acc:
+                    total_equity += acc["equity"]
+                    total_profit += acc["floatingPL"]
+                
                 for p in positions:
-                    all_orders.append({
-                        "ticket": f"#{p.ticket}",
-                        "type": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
-                        "volume": str(p.volume),
-                        "price": str(p.price_open),
-                        "sl": str(p.sl),
-                        "tp": str(p.tp),
-                        "status": "OPEN"
-                    })
-            if orders:
+                    all_orders.append({**p, "ticket": f"{broker.name[:3]}_{p['ticket']}", "status": "OPEN"})
                 for o in orders:
-                    all_orders.append({
-                        "ticket": f"#{o.ticket}",
-                        "type": "BUY STOP" if o.type == mt5.ORDER_TYPE_BUY_STOP else "SELL STOP",
-                        "volume": str(o.volume),
-                        "price": str(o.price_open),
-                        "sl": str(o.sl),
-                        "tp": str(o.tp),
-                        "status": "PENDING"
-                    })
+                    all_orders.append({**o, "ticket": f"{broker.name[:3]}_{o['ticket']}", "status": "PENDING"})
 
-            if tick and account_info:
-                connector.push_to_api({
-                    "price": tick.bid,
-                    "spread": round((tick.ask - tick.bid) / mt5.symbol_info(SYMBOL).point / 10, 1),
-                    "account": {
-                        "balance": account_info.balance,
-                        "equity": account_info.equity,
-                        "marginFree": account_info.margin_free,
-                        "floatingPL": account_info.profit
-                    },
-                    "orders": all_orders
-                })
+            # Push aggregate state to API
+            primary_broker.push_to_api({
+                "price": brokers[0].get_tick(SYMBOL)["bid"] if brokers[0].get_tick(SYMBOL) else 0,
+                "account": {
+                    "equity": total_equity,
+                    "floatingPL": total_profit
+                },
+                "orders": all_orders
+            })
 
-            strategy.run_iteration()
+            # Run strategies
+            if not is_halted:
+                for strat in strategies:
+                    strat.run_iteration()
+            
             time.sleep(ITERATION_SLEEP)
+            
     except KeyboardInterrupt:
-        logger.info("Shutdown requested by user")
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        logger.info("Shutdown requested")
     finally:
-        connector.shutdown()
-        logger.info("System shutdown complete")
+        for broker in brokers:
+            broker.shutdown()
 
 if __name__ == "__main__":
     main()

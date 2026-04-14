@@ -10,42 +10,28 @@ class RiskManager:
         # Simple fixed lot for MVP
         return self.fixed_lot
 
-    def get_sl_tp(self, symbol_info, direction, entry_price):
-        point = symbol_info.point
-        if direction == "BUY":
-            sl = entry_price - (self.sl_points * point)
-            tp = entry_price + (self.tp_points * point)
-        else:
-            sl = entry_price + (self.sl_points * point)
-            tp = entry_price - (self.tp_points * point)
-        return sl, tp
-
     def apply_trailing_stop(self, connector, position):
-        import MetaTrader5 as mt5
-        symbol_info = connector.get_symbol_info(position.symbol)
-        point = symbol_info.point
-        current_tick = connector.get_tick(position.symbol)
+        # position is a dict from get_positions
+        point = 0.01 # Standard for XAUUSD
+        current_tick = connector.get_tick(position["symbol"])
+        if not current_tick: return
         
-        if position.type == mt5.POSITION_TYPE_BUY:
-            if current_tick.bid - position.price_open > self.trailing_stop_points * point:
-                new_sl = current_tick.bid - (self.trailing_stop_points * point)
-                if new_sl > position.sl + (point * 10): # Only move if significant
-                    self._modify_sl(connector, position.ticket, new_sl, position.tp)
-        
-        elif position.type == mt5.POSITION_TYPE_SELL:
-            if position.price_open - current_tick.ask > self.trailing_stop_points * point:
-                new_sl = current_tick.ask + (self.trailing_stop_points * point)
-                if new_sl < position.sl - (point * 10) or position.sl == 0:
-                    self._modify_sl(connector, position.ticket, new_sl, position.tp)
+        pos_type = position["type"]
+        pos_price = position["price_open"]
+        pos_sl = position["sl"]
+        pos_tp = position["tp"]
+        ticket = position["ticket"]
 
-    def _modify_sl(self, connector, ticket, sl, tp):
-        import MetaTrader5 as mt5
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": ticket,
-            "sl": sl,
-            "tp": tp
-        }
-        result = mt5.order_send(request)
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
-            self.logger.info(f"Trailing stop updated for {ticket}", extra_data={"new_sl": sl})
+        if pos_type == "BUY":
+            if current_tick["bid"] - pos_price > self.trailing_stop_points * point:
+                new_sl = round(current_tick["bid"] - (self.trailing_stop_points * point), 2)
+                if new_sl > pos_sl + (point * 10): 
+                    if connector.modify_position(ticket, new_sl, pos_tp):
+                        self.logger.info(f"[{connector.__class__.__name__}] Trailing stop updated for {ticket} to {new_sl}")
+        
+        elif pos_type == "SELL":
+            if pos_price - current_tick["ask"] > self.trailing_stop_points * point:
+                new_sl = round(current_tick["ask"] + (self.trailing_stop_points * point), 2)
+                if new_sl < pos_sl - (point * 10) or pos_sl == 0:
+                    if connector.modify_position(ticket, new_sl, pos_tp):
+                        self.logger.info(f"[{connector.__class__.__name__}] Trailing stop updated for {ticket} to {new_sl}")

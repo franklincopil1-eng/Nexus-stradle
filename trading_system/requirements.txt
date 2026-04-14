@@ -3,3 +3,4 @@ pandas
 python-dotenv
 pytz
 requests
+oandapyV20

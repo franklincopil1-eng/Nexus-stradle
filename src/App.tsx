@@ -21,6 +21,7 @@ interface Order {
 export default function App() {
   const [price, setPrice] = useState(2024.58);
   const [spread, setSpread] = useState(1.2);
+  const [systemStatus, setSystemStatus] = useState('ENGAGED');
   const [account, setAccount] = useState({
     balance: 10000.00,
     equity: 10000.00,
@@ -29,6 +30,7 @@ export default function App() {
   });
   const [orders, setOrders] = useState<Order[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [connectedBrokers, setConnectedBrokers] = useState<string[]>([]);
   
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -39,9 +41,21 @@ export default function App() {
         const data = await res.json();
         setPrice(data.price);
         setSpread(data.spread);
+        setSystemStatus(data.systemStatus);
         setAccount(data.account);
         setOrders(data.orders);
         setLogs(data.logs);
+        
+        // Extract unique broker names from orders or logs if not explicitly provided
+        // For now, let's assume we can get them from the logs or just hardcode the ones we expect if they have logs
+        const brokers = new Set<string>();
+        data.logs.forEach((l: LogEntry) => {
+          if (l.message.includes("Connected to")) {
+            const match = l.message.match(/Connected to ([^:]+)/);
+            if (match) brokers.add(match[1]);
+          }
+        });
+        setConnectedBrokers(Array.from(brokers));
       } catch (err) {
         console.error("Failed to fetch state", err);
       }
@@ -50,6 +64,18 @@ export default function App() {
     const interval = setInterval(fetchState, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const sendCommand = async (command: string) => {
+    try {
+      await fetch('/api/command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command })
+      });
+    } catch (err) {
+      console.error("Failed to send command", err);
+    }
+  };
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -64,13 +90,21 @@ export default function App() {
           <span className="text-[#71717a] font-light text-xs tracking-normal">// EXECUTION ENGINE</span>
         </div>
         <div className="flex gap-8">
-          <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#22c55e]">
-            <div className="w-2 h-2 bg-[#22c55e] rounded-full shadow-[0_0_8px_#22c55e]" />
-            MT5 CONNECTED [DEMO]
-          </div>
+          {connectedBrokers.map(broker => (
+            <div key={broker} className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#22c55e]">
+              <div className="w-2 h-2 bg-[#22c55e] rounded-full shadow-[0_0_8px_#22c55e]" />
+              {broker}: CONNECTED
+            </div>
+          ))}
+          {connectedBrokers.length === 0 && (
+            <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#71717a]">
+              <div className="w-2 h-2 bg-[#71717a] rounded-full" />
+              WAITING FOR BROKERS...
+            </div>
+          )}
           <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#71717a]">
             <div className="w-2 h-2 bg-[#71717a] rounded-full" />
-            STRATEGY: STRADDLE_V1_RUNNING
+            STRATEGY: MULTI_BROKER_RUNNING
           </div>
         </div>
       </header>
@@ -171,8 +205,18 @@ export default function App() {
         <section className="pane">
           <h3 className="section-title">Risk & Strategy</h3>
           <div className="flex flex-col gap-2.5">
-            <button className="btn btn-active">SYSTEM ENGAGED</button>
-            <button className="btn">HALT ALL TRADING</button>
+            <button 
+              onClick={() => sendCommand(systemStatus === 'ENGAGED' ? 'HALT' : 'RESUME')}
+              className={`btn ${systemStatus === 'ENGAGED' ? 'btn-active' : 'border-[#ef4444] text-[#ef4444]'}`}
+            >
+              {systemStatus === 'ENGAGED' ? 'SYSTEM ENGAGED' : 'SYSTEM HALTED'}
+            </button>
+            <button 
+              onClick={() => sendCommand('CLOSE_ALL')}
+              className="btn hover:border-[#ef4444] hover:text-[#ef4444]"
+            >
+              HALT & CLOSE ALL
+            </button>
           </div>
           
           <div className="space-y-3">
