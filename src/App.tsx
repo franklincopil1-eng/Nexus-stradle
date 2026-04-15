@@ -19,14 +19,23 @@ interface Order {
 }
 
 export default function App() {
-  const [price, setPrice] = useState(2024.58);
-  const [spread, setSpread] = useState(1.2);
+  const [price, setPrice] = useState(0);
+  const [spread, setSpread] = useState(0);
+  const [rangeHigh, setRangeHigh] = useState(0);
+  const [rangeLow, setRangeLow] = useState(0);
+  const [riskSettings, setRiskSettings] = useState({
+    fixedLot: 0,
+    slPoints: 0,
+    tpPoints: 0,
+    trailingStop: 0,
+    lookback: 0
+  });
   const [systemStatus, setSystemStatus] = useState('ENGAGED');
   const [account, setAccount] = useState({
-    balance: 10000.00,
-    equity: 10000.00,
-    marginFree: 10000.00,
-    floatingPL: 0.00
+    balance: 0,
+    equity: 0,
+    marginFree: 0,
+    floatingPL: 0
   });
   const [orders, setOrders] = useState<Order[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -41,6 +50,9 @@ export default function App() {
         const data = await res.json();
         setPrice(data.price);
         setSpread(data.spread);
+        setRangeHigh(data.rangeHigh);
+        setRangeLow(data.rangeLow);
+        setRiskSettings(data.riskSettings);
         setSystemStatus(data.systemStatus);
         setAccount(data.account);
         setOrders(data.orders);
@@ -132,12 +144,12 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="stat-card">
-              <div className="stat-label">Range High (5m)</div>
-              <div className="stat-value">2026.15</div>
+              <div className="stat-label">Range High ({riskSettings.lookback * 5}m)</div>
+              <div className="stat-value">{rangeHigh.toFixed(2)}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Range Low (5m)</div>
-              <div className="stat-value">2021.40</div>
+              <div className="stat-label">Range Low ({riskSettings.lookback * 5}m)</div>
+              <div className="stat-value">{rangeLow.toFixed(2)}</div>
             </div>
           </div>
 
@@ -221,16 +233,16 @@ export default function App() {
           
           <div className="space-y-3">
             <div className="stat-card">
-              <div className="stat-label">Risk Per Trade</div>
-              <div className="stat-value">1.0% / $100</div>
+              <div className="stat-label">Fixed Lot Size</div>
+              <div className="stat-value">{riskSettings.fixedLot} Lots</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Straddle Interval</div>
-              <div className="stat-value">15 min</div>
+              <div className="stat-label">S/L | T/P Points</div>
+              <div className="stat-value">{riskSettings.slPoints} | {riskSettings.tpPoints}</div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Trailing Step</div>
-              <div className="stat-value">25 pts</div>
+              <div className="stat-label">Trailing Stop</div>
+              <div className="stat-value">{riskSettings.trailingStop} pts</div>
             </div>
           </div>
 
@@ -239,7 +251,9 @@ export default function App() {
               <AlertTriangle size={10} /> System Notice
             </div>
             <div className="text-[11px] leading-relaxed">
-              Slippage observed on last execution: 0.12 pts. Adjusting buffers.
+              {logs.filter(l => l.level === 'ERROR').length > 0 
+                ? `Latest Error: ${logs.filter(l => l.level === 'ERROR').slice(-1)[0].message}`
+                : `System operational. Monitoring ${connectedBrokers.length} brokers.`}
             </div>
           </div>
         </section>

@@ -14,14 +14,23 @@ async function startServer() {
 
   // In-memory state for the trading dashboard
   let tradingState = {
-    price: 2024.58,
-    spread: 1.2,
+    price: 0,
+    spread: 0,
+    rangeHigh: 0,
+    rangeLow: 0,
     systemStatus: 'ENGAGED', // 'ENGAGED' or 'HALTED'
+    riskSettings: {
+      fixedLot: 0,
+      slPoints: 0,
+      tpPoints: 0,
+      trailingStop: 0,
+      lookback: 0
+    },
     account: {
-      balance: 10000.00,
-      equity: 10000.00,
-      marginFree: 10000.00,
-      floatingPL: 0.00
+      balance: 0,
+      equity: 0,
+      marginFree: 0,
+      floatingPL: 0
     },
     orders: [],
     logs: [
@@ -62,10 +71,13 @@ async function startServer() {
   });
 
   app.post("/api/update", (req, res) => {
-    const { price, spread, account, orders, log } = req.body;
+    const { price, spread, rangeHigh, rangeLow, riskSettings, account, orders, log } = req.body;
     
     if (price !== undefined) tradingState.price = price;
     if (spread !== undefined) tradingState.spread = spread;
+    if (rangeHigh !== undefined) tradingState.rangeHigh = rangeHigh;
+    if (rangeLow !== undefined) tradingState.rangeLow = rangeLow;
+    if (riskSettings) tradingState.riskSettings = riskSettings;
     if (account) tradingState.account = account;
     if (orders) tradingState.orders = orders;
     if (log) {

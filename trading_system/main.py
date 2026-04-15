@@ -163,15 +163,26 @@ def main():
             all_orders = []
             total_equity = 0
             total_profit = 0
+            total_balance = 0
+            total_margin_free = 0
             
+            primary_tick = brokers[0].get_tick(SYMBOL)
+            spread = (primary_tick["ask"] - primary_tick["bid"]) * 100 if primary_tick else 0 # in points
+            
+            # Get range data from primary broker
+            df = brokers[0].get_historical_data(SYMBOL, TIMEFRAME, LOOKBACK_CANDLES)
+            range_high = df['high'].max() if df is not None and not df.empty else 0
+            range_low = df['low'].min() if df is not None and not df.empty else 0
+
             for broker in brokers:
-                tick = broker.get_tick(SYMBOL)
                 acc = broker.get_account_info()
                 positions = broker.get_positions(SYMBOL)
                 orders = broker.get_pending_orders(SYMBOL)
                 
                 if acc:
+                    total_balance += acc["balance"]
                     total_equity += acc["equity"]
+                    total_margin_free += acc["marginFree"]
                     total_profit += acc["floatingPL"]
                 
                 for p in positions:
@@ -181,9 +192,21 @@ def main():
 
             # Push aggregate state to API
             primary_broker.push_to_api({
-                "price": brokers[0].get_tick(SYMBOL)["bid"] if brokers[0].get_tick(SYMBOL) else 0,
+                "price": primary_tick["bid"] if primary_tick else 0,
+                "spread": round(spread, 1),
+                "rangeHigh": range_high,
+                "rangeLow": range_low,
+                "riskSettings": {
+                    "fixedLot": FIXED_LOT,
+                    "slPoints": SL_POINTS,
+                    "tpPoints": TP_POINTS,
+                    "trailingStop": TRAILING_STOP_POINTS,
+                    "lookback": LOOKBACK_CANDLES
+                },
                 "account": {
+                    "balance": total_balance,
                     "equity": total_equity,
+                    "marginFree": total_margin_free,
                     "floatingPL": total_profit
                 },
                 "orders": all_orders
