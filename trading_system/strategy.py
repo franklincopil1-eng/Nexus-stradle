@@ -12,51 +12,44 @@ class StraddleStrategy:
         self.logger = logger
 
     def run_iteration(self):
-        # 1. Check if we have open positions
-        positions = self.connector.get_positions(self.symbol)
-        if positions:
+        # 1. Get state
+        state = self.connector.get_straddle_state(self.symbol)
+
+        # 2. If state != NO_STRADDLE → EXIT (Handle positions if active)
+        if state == "POSITION_ACTIVE":
+            positions = self.connector.get_positions(self.symbol)
             self._handle_active_positions(positions)
             return
-
-        # 2. Check if we already have pending orders
-        orders = self.connector.get_pending_orders(self.symbol)
-        if orders:
-            self.logger.info(f"[{self.connector.name}] Pending orders exist, skipping")
+            
+        if state != "NO_STRADDLE":
             return
 
-        # 3. Calculate High/Low
-        df = self.connector.get_historical_data(self.symbol, self.timeframe, self.lookback_candles)
-        if df is None or df.empty:
-            self.logger.error(f"[{self.connector.name}] Failed to fetch history")
+        # 3. Calculate straddle prices
+        prices = self.connector.calculate_straddle_prices(self.symbol, self.timeframe, self.offset_points)
+        
+        # 4. If None → EXIT
+        if not prices:
             return
+        buy_stop_price, sell_stop_price = prices
 
-        recent_high = df['high'].max()
-        recent_low = df['low'].min()
-        
-        # Use a fixed point value for now if not available from broker
-        point = 0.01 # Standard for XAUUSD (10 points = 0.10)
-        
-        buy_stop_price = round(recent_high + (self.offset_points * 0.01), 2)
-        sell_stop_price = round(recent_low - (self.offset_points * 0.01), 2)
-
-        # 4. Place orders
+        # 5. Place: Buy Stop, Sell Stop
         acc = self.connector.get_account_info()
         lot = self.risk_manager.calculate_lot(acc)
         
-        # Generic order types (handled by connector)
-        # We'll use MT5 constants if it's MT5, or strings for OANDA
-        # For simplicity, let's pass strings and let connector handle it
-        
-        # Buy Stop
+        # Calculate SL/TP
         sl_buy = round(buy_stop_price - (200 * 0.01), 2)
         tp_buy = round(buy_stop_price + (400 * 0.01), 2)
-        
-        import MetaTrader5 as mt5 # Still needed for constants if using MT5
-        order_type_buy = mt5.ORDER_TYPE_BUY_STOP if "MT5" in self.connector.__class__.__name__ else "BUY_STOP"
-        order_type_sell = mt5.ORDER_TYPE_SELL_STOP if "MT5" in self.connector.__class__.__name__ else "SELL_STOP"
+        sl_sell = round(sell_stop_price + (200 * 0.01), 2)
+        tp_sell = round(sell_stop_price - (400 * 0.01), 2)
 
-        self.connector.execute_order(self.symbol, order_type_buy, lot, buy_stop_price, sl_buy, tp_buy, "Straddle Buy")
-        self.connector.execute_order(self.symbol, order_type_sell, lot, sell_stop_price, sl_buy, tp_buy, "Straddle Sell")
+        import MetaTrader5 as mt5
+        is_mt5 = any(x in self.connector.__class__.__name__ for x in ["MT5", "Exness", "Valetax", "Pepperstone"])
+        order_type_buy = mt5.ORDER_TYPE_BUY_STOP if is_mt5 else "BUY_STOP"
+        order_type_sell = mt5.ORDER_TYPE_SELL_STOP if is_mt5 else "SELL_STOP"
+
+        self.logger.info(f"[{self.connector.name}] Placing clean straddle at {buy_stop_price} / {sell_stop_price}")
+        self.connector.execute_order_with_retry(self.symbol, order_type_buy, lot, buy_stop_price, sl_buy, tp_buy, "Straddle Buy")
+        self.connector.execute_order_with_retry(self.symbol, order_type_sell, lot, sell_stop_price, sl_sell, tp_sell, "Straddle Sell")
 
     def _handle_active_positions(self, positions):
         # Cancel pending

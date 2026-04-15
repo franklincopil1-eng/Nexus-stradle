@@ -122,15 +122,18 @@ class MT5Connector(Broker):
         result = mt5.order_send(request)
         execution_delay = time.time() - start_time
 
+        if result is None:
+            err_msg = f"MT5 Order failed: Terminal returned None (Connection lost?)"
+            self.logger.error(err_msg)
+            self.push_to_api({"log": {"level": "ERROR", "message": err_msg}})
+            return None
+
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             err_msg = f"MT5 Order failed: {result.retcode} ({mt5.last_error()})"
             self.logger.error(err_msg)
             self.push_to_api({"log": {"level": "ERROR", "message": err_msg}})
             return None
 
-        success_msg = f"MT5 Order #{result.order} executed. Delay: {execution_delay:.3f}s"
-        self.logger.info(success_msg)
-        self.push_to_api({"log": {"level": "EXECUTION", "message": success_msg}})
         return result.order
 
     def cancel_order(self, ticket):
@@ -147,6 +150,179 @@ class MT5Connector(Broker):
         }
         result = mt5.order_send(request)
         return result.retcode == mt5.TRADE_RETCODE_DONE
+
+    def verify_order_exists(self, order_id, symbol):
+        """TASK 2: Robust verification with registration wait"""
+        # Short polling for registration (MT5 can have slight latency)
+        for _ in range(3):
+            orders = mt5.orders_get(symbol=symbol)
+            if orders:
+                for o in orders:
+                    if o.ticket == order_id:
+                        return True
+            time.sleep(0.2)
+        return False
+
+    def normalize_price(self, symbol, price):
+        """TASK 3: Round price to broker precision (Dynamic Digits)"""
+        if price is None: return None
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            self.logger.error(f"[{self.name}] Failed to get dynamic symbol info for {symbol}")
+            return None
+        return round(float(price), info.digits)
+
+    def get_valid_tick(self, symbol):
+        """TASK 1: Fetch and validate recent tick (Freeze Detection)"""
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None: return None
+        
+        # Integrity check
+        if not (tick.bid > 0 and tick.ask > 0 and tick.ask > tick.bid):
+            return None
+            
+        # Freeze detection: Ensure tick is within 2 seconds of system time
+        if (time.time() - tick.time) > 2:
+            self.logger.warning(f"[{self.name}] Market Freeze Detected: Tick is {time.time() - tick.time:.1f}s old")
+            return None
+            
+        return tick
+
+    def is_spread_acceptable(self, symbol, max_spread_points):
+        """TASK 2: Check if current spread is within limits (Atomic)"""
+        tick = mt5.symbol_info_tick(symbol)
+        info = mt5.symbol_info(symbol)
+        if tick is None or info is None: return False
+        
+        # Recalculate points dynamically in case broker changes contract specs
+        spread_points = round((tick.ask - tick.bid) / info.point)
+        if spread_points > max_spread_points:
+            self.logger.warning(f"[{self.name}] Spread Spike: {spread_points} pts > {max_spread_points} limit")
+            return False
+        return True
+
+    def is_trading_time(self, symbol):
+        """TASK 4: Avoid market open and rollover"""
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick: return False
+        
+        server_time = datetime.fromtimestamp(tick.time)
+        hour, minute = server_time.hour, server_time.minute
+        
+        # Avoid rollover (23:55+) and first 5 mins of open (00:00-00:05)
+        if (hour == 23 and minute >= 55) or (hour == 0 and minute <= 5):
+            self.logger.warning(f"[{self.name}] Outside trading window: {hour:02d}:{minute:02d}")
+            return False
+        return True
+
+    def get_straddle_state(self, symbol):
+        """TASK 1: Straddle State Machine"""
+        # 1. Check for active positions
+        positions = mt5.positions_get(symbol=symbol)
+        if positions and len(positions) > 0:
+            return "POSITION_ACTIVE"
+
+        # 2. Check for pending orders
+        orders = mt5.orders_get(symbol=symbol)
+        if orders:
+            has_buy_stop = any(o.type == mt5.ORDER_TYPE_BUY_STOP for o in orders)
+            has_sell_stop = any(o.type == mt5.ORDER_TYPE_SELL_STOP for o in orders)
+            
+            if has_buy_stop and has_sell_stop:
+                return "STRADDLE_PENDING"
+        
+        return "NO_STRADDLE"
+
+    def calculate_straddle_prices(self, symbol, timeframe, buffer_points=50):
+        """TASK 1: Clean straddle price calculation"""
+        # 1. Get recent candles (last 20)
+        df = self.get_historical_data(symbol, timeframe, 20)
+        if df is None or df.empty:
+            return None
+            
+        # 2. Find High/Low
+        recent_high = df['high'].max()
+        recent_low = df['low'].min()
+        
+        # 3. Buffer calculation
+        info = mt5.symbol_info(symbol)
+        if not info: return None
+        buffer = buffer_points * info.point
+        
+        # 4. Calculate stops
+        buy_stop = recent_high + buffer
+        sell_stop = recent_low - buffer
+        
+        # 5. Normalize
+        buy_stop = self.normalize_price(symbol, buy_stop)
+        sell_stop = self.normalize_price(symbol, sell_stop)
+        
+        # 6. Ensure validity against current market
+        tick = self.get_valid_tick(symbol)
+        if not tick: return None
+        
+        if buy_stop <= tick.ask or sell_stop >= tick.bid:
+            self.logger.warning(f"[{self.name}] Straddle invalid: BS({buy_stop}) <= Ask({tick.ask}) or SS({sell_stop}) >= Bid({tick.bid})")
+            return None
+            
+        return buy_stop, sell_stop
+
+    def execute_order_with_retry(self, symbol, order_type, volume, price=None, sl=None, tp=None, comment="", retries=3):
+        """TASK 1 & 3: Stress-tested execution with Atomic Market Awareness and State Control"""
+        
+        # 1. Trading Window Filter (Pre-flight)
+        if not self.is_trading_time(symbol):
+            return None
+
+        # TASK 2: State Control - Prevent Duplicate Placement
+        state = self.get_straddle_state(symbol)
+        if state in ["STRADDLE_PENDING", "POSITION_ACTIVE"]:
+            self.logger.info(f"[{self.name}] State Control: {state} for {symbol}. Skipping placement.")
+            return None
+
+        for attempt in range(1, retries + 1):
+            self.logger.info(f"[{self.name}] Execution attempt {attempt}/{retries} for {symbol}")
+            
+            # 2. Atomic Market Validation (Protects against freezes/spikes between retries)
+            tick = self.get_valid_tick(symbol)
+            if not tick or not self.is_spread_acceptable(symbol, 100):
+                time.sleep(1)
+                continue
+
+            # 3. Dynamic Normalization (Protects against dynamic digit changes)
+            n_price = self.normalize_price(symbol, price)
+            n_sl = self.normalize_price(symbol, sl)
+            n_tp = self.normalize_price(symbol, tp)
+            
+            if n_price is None and price is not None: # Info fetch failed
+                time.sleep(1)
+                continue
+
+            # 4. Duplicate prevention check
+            existing_orders = self.get_pending_orders(symbol)
+            if any(o['type'] == ("BUY STOP" if order_type == mt5.ORDER_TYPE_BUY_STOP else "SELL STOP") for o in existing_orders):
+                self.logger.warning(f"[{self.name}] Duplicate Prevention: {symbol} {comment} already exists. Skipping.")
+                return None
+
+            # 5. Execution
+            order_id = self.execute_order(symbol, order_type, volume, n_price, n_sl, n_tp, comment)
+            
+            if order_id:
+                # Verification for pending orders
+                is_pending = order_type not in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
+                if not is_pending or self.verify_order_exists(order_id, symbol):
+                    # ONLY log success after verification
+                    success_msg = f"[{self.name}] Order #{order_id} confirmed and verified in book."
+                    self.logger.info(success_msg)
+                    self.push_to_api({"log": {"level": "EXECUTION", "message": success_msg}})
+                    return order_id
+                else:
+                    self.logger.error(f"[{self.name}] Order #{order_id} placed but NOT found in book. Retrying...")
+            
+            time.sleep(1) # Safety delay between retries
+            
+        self.logger.error(f"[{self.name}] CRITICAL: All {retries} attempts failed for {symbol}")
+        return None
 
     def shutdown(self):
         mt5.shutdown()

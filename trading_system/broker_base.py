@@ -40,3 +40,12 @@ class Broker(ABC):
     @abstractmethod
     def shutdown(self):
         pass
+
+    def get_valid_tick(self, symbol):
+        return self.get_tick(symbol)
+
+    def is_spread_acceptable(self, symbol, max_spread_points):
+        return True
+
+    def is_trading_time(self, symbol):
+        return True
