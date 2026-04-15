@@ -4,6 +4,7 @@ from datetime import datetime
 import time
 import requests
 from broker_base import Broker
+from event_logger import trade_logger
 
 class MT5Connector(Broker):
     def __init__(self, login, password, server, logger, api_url=None):
@@ -183,7 +184,9 @@ class MT5Connector(Broker):
             
         # Freeze detection: Ensure tick is within 2 seconds of system time
         if (time.time() - tick.time) > 2:
-            self.logger.warning(f"[{self.name}] Market Freeze Detected: Tick is {time.time() - tick.time:.1f}s old")
+            delay = time.time() - tick.time
+            self.logger.warning(f"[{self.name}] Market Freeze Detected: Tick is {delay:.1f}s old")
+            trade_logger.log_event(symbol, "MARKET_TICK_FREEZE", details=f"Delay: {delay:.1f}s")
             return None
             
         return tick
@@ -198,6 +201,7 @@ class MT5Connector(Broker):
         spread_points = round((tick.ask - tick.bid) / info.point)
         if spread_points > max_spread_points:
             self.logger.warning(f"[{self.name}] Spread Spike: {spread_points} pts > {max_spread_points} limit")
+            trade_logger.log_event(symbol, "MARKET_SPREAD_SPIKE", spread=spread_points, details=f"Limit: {max_spread_points}")
             return False
         return True
 
@@ -305,9 +309,30 @@ class MT5Connector(Broker):
                 return None
 
             # 5. Execution
+            # Capture spread at entry
+            tick = self.get_valid_tick(symbol)
+            spread = round((tick.ask - tick.bid) / mt5.symbol_info(symbol).point) if tick else None
+            
+            trade_logger.log_event(
+                symbol, 
+                "ORDER_PLACEMENT_ATTEMPT", 
+                expected_price=n_price, 
+                spread=spread,
+                details=comment
+            )
+            
             order_id = self.execute_order(symbol, order_type, volume, n_price, n_sl, n_tp, comment)
             
             if order_id:
+                # Log accepted with expected price to calculate slippage later
+                trade_logger.log_event(
+                    symbol, 
+                    "ORDER_ACCEPTED", 
+                    position_id=order_id, 
+                    price=n_price,
+                    expected_price=n_price,
+                    details=f"Type: {'BUY_STOP' if order_type == mt5.ORDER_TYPE_BUY_STOP else 'SELL_STOP'}"
+                )
                 # Verification for pending orders
                 is_pending = order_type not in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
                 if not is_pending or self.verify_order_exists(order_id, symbol):
@@ -318,6 +343,8 @@ class MT5Connector(Broker):
                     return order_id
                 else:
                     self.logger.error(f"[{self.name}] Order #{order_id} placed but NOT found in book. Retrying...")
+            else:
+                trade_logger.log_event(symbol, "ORDER_REJECTED", expected_price=n_price, details=f"Retcode: {mt5.last_error()}")
             
             time.sleep(1) # Safety delay between retries
             

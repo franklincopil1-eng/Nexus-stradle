@@ -1,5 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta
+from event_logger import trade_logger
 
 class StraddleStrategy:
     def __init__(self, connector, risk_manager, symbol, timeframe, lookback_candles, offset_points, logger):
@@ -10,6 +11,7 @@ class StraddleStrategy:
         self.lookback_candles = lookback_candles
         self.offset_points = offset_points
         self.logger = logger
+        self.active_tickets = set() # Track active tickets for exit detection
 
     def run_iteration(self):
         # 1. Get state
@@ -52,6 +54,22 @@ class StraddleStrategy:
         self.connector.execute_order_with_retry(self.symbol, order_type_sell, lot, sell_stop_price, sl_sell, tp_sell, "Straddle Sell")
 
     def _handle_active_positions(self, positions):
+        # 0. Detect Exits (SL/TP)
+        current_tickets = {p["ticket"] for p in positions}
+        exited_tickets = self.active_tickets - current_tickets
+        
+        for ticket in exited_tickets:
+            # Log exit (In a real system, we'd fetch the actual exit price from history)
+            # For now, we log that it closed.
+            trade_logger.log_event(
+                self.symbol, 
+                "POSITION_CLOSED", 
+                position_id=ticket,
+                details="Position no longer found in active list (SL/TP/Manual)"
+            )
+        
+        self.active_tickets = current_tickets
+
         # 1. Detect active position types
         has_buy = any(p["type"] == "BUY" for p in positions)
         has_sell = any(p["type"] == "SELL" for p in positions)
@@ -86,6 +104,16 @@ class StraddleStrategy:
             current_sl = pos["sl"]
             pos_type = pos["type"]
             tp = pos["tp"]
+            
+            # Log Market Update for MFE/MAE
+            current_price = tick.bid if pos_type == "BUY" else tick.ask
+            trade_logger.log_event(
+                self.symbol,
+                "POSITION_MARKET_UPDATE",
+                position_id=ticket,
+                price=current_price,
+                details=f"Type: {pos_type}"
+            )
             
             new_sl = None
             log_msg = ""
@@ -130,3 +158,13 @@ class StraddleStrategy:
                 new_sl = self.connector.normalize_price(self.symbol, new_sl)
                 if self.connector.modify_position(ticket, new_sl, tp):
                     self.logger.info(f"[{self.connector.name}] {log_msg} for #{ticket} to {new_sl}")
+                    
+                    # Log event
+                    event_type = "POSITION_BREAK_EVEN" if log_msg == "Moved SL to Break Even" else "POSITION_TRAILING_UPDATE"
+                    trade_logger.log_event(
+                        self.symbol, 
+                        event_type, 
+                        price=new_sl, 
+                        position_id=ticket, 
+                        details=f"New SL: {new_sl}"
+                    )
