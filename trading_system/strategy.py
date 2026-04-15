@@ -52,12 +52,81 @@ class StraddleStrategy:
         self.connector.execute_order_with_retry(self.symbol, order_type_sell, lot, sell_stop_price, sl_sell, tp_sell, "Straddle Sell")
 
     def _handle_active_positions(self, positions):
-        # Cancel pending
-        orders = self.connector.get_pending_orders(self.symbol)
-        for order in orders:
-            self.connector.cancel_order(order["ticket"])
-            self.logger.info(f"[{self.connector.name}] Cancelled pending {order['ticket']}")
+        # 1. Detect active position types
+        has_buy = any(p["type"] == "BUY" for p in positions)
+        has_sell = any(p["type"] == "SELL" for p in positions)
 
-        # Apply trailing stop
+        # 2. Fetch all pending orders for the symbol
+        orders = self.connector.get_pending_orders(self.symbol)
+
+        # 3. Logic: Cleanup opposite pending orders
+        for order in orders:
+            if has_buy and order["type"] == "SELL STOP":
+                self.connector.cancel_order(order["ticket"])
+                self.logger.info(f"[{self.connector.name}] Removed opposite pending order: SELL STOP")
+            elif has_sell and order["type"] == "BUY STOP":
+                self.connector.cancel_order(order["ticket"])
+                self.logger.info(f"[{self.connector.name}] Removed opposite pending order: BUY STOP")
+
+        # 4. Professional Position Management
+        import MetaTrader5 as mt5
+        tick = self.connector.get_valid_tick(self.symbol)
+        info = mt5.symbol_info(self.symbol)
+        if not tick or not info:
+            return
+
+        point = info.point
+        be_trigger = 100 # points
+        ts_start = 150   # points
+        ts_step = 50     # points
+
         for pos in positions:
-            self.risk_manager.apply_trailing_stop(self.connector, pos)
+            ticket = pos["ticket"]
+            entry_price = pos["price_open"]
+            current_sl = pos["sl"]
+            pos_type = pos["type"]
+            tp = pos["tp"]
+            
+            new_sl = None
+            log_msg = ""
+            
+            if pos_type == "BUY":
+                current_price = tick.bid
+                profit_points = (current_price - entry_price) / point
+                
+                # Trailing Logic
+                if profit_points >= ts_start:
+                    potential_sl = current_price - (ts_step * point)
+                    # Only update if it improves SL and is meaningful (>10 points)
+                    if potential_sl > current_sl + (10 * point):
+                        new_sl = potential_sl
+                        log_msg = "Trailing Stop Updated"
+                
+                # Break Even Logic
+                elif profit_points >= be_trigger:
+                    if current_sl < entry_price:
+                        new_sl = entry_price
+                        log_msg = "Moved SL to Break Even"
+            
+            elif pos_type == "SELL":
+                current_price = tick.ask
+                profit_points = (entry_price - current_price) / point
+                
+                # Trailing Logic
+                if profit_points >= ts_start:
+                    potential_sl = current_price + (ts_step * point)
+                    # Only update if it improves SL (lower for SELL) and is meaningful
+                    if current_sl == 0 or potential_sl < current_sl - (10 * point):
+                        new_sl = potential_sl
+                        log_msg = "Trailing Stop Updated"
+                
+                # Break Even Logic
+                elif profit_points >= be_trigger:
+                    if current_sl == 0 or current_sl > entry_price:
+                        new_sl = entry_price
+                        log_msg = "Moved SL to Break Even"
+
+            if new_sl is not None:
+                new_sl = self.connector.normalize_price(self.symbol, new_sl)
+                if self.connector.modify_position(ticket, new_sl, tp):
+                    self.logger.info(f"[{self.connector.name}] {log_msg} for #{ticket} to {new_sl}")

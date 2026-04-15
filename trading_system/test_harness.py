@@ -170,5 +170,123 @@ class TestMT5Robustness(unittest.TestCase):
         print("Expected Logs:")
         print("[INFO] [MT5] State Control: STRADDLE_PENDING for XAUUSD. Skipping placement.")
 
+    def test_cleanup_opposite_order(self):
+        print("\n--- Testing Cleanup of Opposite Pending Order ---")
+        from strategy import StraddleStrategy
+        
+        # Mock active BUY position
+        positions = [{"type": "BUY", "ticket": 123, "symbol": "XAUUSD", "price_open": 2000.0, "sl": 1998.0, "tp": 2004.0}]
+        
+        # Mock pending SELL STOP order
+        pending_orders = [{"type": "SELL STOP", "ticket": 456, "symbol": "XAUUSD"}]
+        self.connector.get_pending_orders = MagicMock(return_value=pending_orders)
+        self.connector.cancel_order = MagicMock(return_value=True)
+        
+        # Mock valid tick for position management
+        mock_tick = MagicMock()
+        mock_tick.bid = 2000.5
+        mock_tick.ask = 2000.6
+        mock_tick.time = time.time()
+        self.mock_mt5.symbol_info_tick.return_value = mock_tick
+        
+        mock_info = MagicMock()
+        mock_info.point = 0.01
+        mock_info.digits = 2
+        self.mock_mt5.symbol_info.return_value = mock_info
+        
+        strategy = StraddleStrategy(self.connector, MagicMock(), "XAUUSD", None, 20, 50, self.logger)
+        strategy._handle_active_positions(positions)
+        
+        self.connector.cancel_order.assert_called_with(456)
+        print("Verified: SELL STOP order 456 was cancelled when BUY position 123 was active.")
+
+    def test_phase4_break_even(self):
+        print("\n--- Testing Phase 4: Break-even Logic ---")
+        from strategy import StraddleStrategy
+        
+        # BUY position at 2000.0, SL at 1998.0
+        # Price moves to 2001.0 (+100 points)
+        positions = [{"type": "BUY", "ticket": 123, "symbol": "XAUUSD", "price_open": 2000.0, "sl": 1998.0, "tp": 2004.0}]
+        
+        mock_tick = MagicMock()
+        mock_tick.bid = 2001.0
+        mock_tick.ask = 2001.1
+        mock_tick.time = time.time()
+        self.mock_mt5.symbol_info_tick.return_value = mock_tick
+        
+        mock_info = MagicMock()
+        mock_info.point = 0.01
+        mock_info.digits = 2
+        self.mock_mt5.symbol_info.return_value = mock_info
+        
+        self.connector.modify_position = MagicMock(return_value=True)
+        self.connector.get_pending_orders = MagicMock(return_value=[])
+        
+        strategy = StraddleStrategy(self.connector, MagicMock(), "XAUUSD", None, 20, 50, self.logger)
+        strategy._handle_active_positions(positions)
+        
+        # Should move SL to entry (2000.0)
+        self.connector.modify_position.assert_called_with(123, 2000.0, 2004.0)
+        print("Verified: SL moved to Break Even (2000.0) when profit reached 100 points.")
+
+    def test_phase4_trailing_stop(self):
+        print("\n--- Testing Phase 4: Trailing Stop Logic ---")
+        from strategy import StraddleStrategy
+        
+        # BUY position at 2000.0, SL already at BE 2000.0
+        # Price moves to 2002.0 (+200 points)
+        # Trailing Start: 150 points, Step: 50 points
+        # New SL should be 2002.0 - 0.50 = 2001.5
+        positions = [{"type": "BUY", "ticket": 123, "symbol": "XAUUSD", "price_open": 2000.0, "sl": 2000.0, "tp": 2004.0}]
+        
+        mock_tick = MagicMock()
+        mock_tick.bid = 2002.0
+        mock_tick.ask = 2002.1
+        mock_tick.time = time.time()
+        self.mock_mt5.symbol_info_tick.return_value = mock_tick
+        
+        mock_info = MagicMock()
+        mock_info.point = 0.01
+        mock_info.digits = 2
+        self.mock_mt5.symbol_info.return_value = mock_info
+        
+        self.connector.modify_position = MagicMock(return_value=True)
+        self.connector.get_pending_orders = MagicMock(return_value=[])
+        
+        strategy = StraddleStrategy(self.connector, MagicMock(), "XAUUSD", None, 20, 50, self.logger)
+        strategy._handle_active_positions(positions)
+        
+        self.connector.modify_position.assert_called_with(123, 2001.5, 2004.0)
+        print("Verified: Trailing Stop moved to 2001.5 (Price 2002.0 - 50 pts).")
+
+    def test_phase4_no_sl_regression(self):
+        print("\n--- Testing Phase 4: No SL Regression ---")
+        from strategy import StraddleStrategy
+        
+        # BUY position at 2000.0, SL already at 2001.5
+        # Price drops to 2001.6 (Still in profit, but trailing would suggest 2001.1)
+        # SL should NOT move backward
+        positions = [{"type": "BUY", "ticket": 123, "symbol": "XAUUSD", "price_open": 2000.0, "sl": 2001.5, "tp": 2004.0}]
+        
+        mock_tick = MagicMock()
+        mock_tick.bid = 2001.6
+        mock_tick.ask = 2001.7
+        mock_tick.time = time.time()
+        self.mock_mt5.symbol_info_tick.return_value = mock_tick
+        
+        mock_info = MagicMock()
+        mock_info.point = 0.01
+        mock_info.digits = 2
+        self.mock_mt5.symbol_info.return_value = mock_info
+        
+        self.connector.modify_position = MagicMock()
+        self.connector.get_pending_orders = MagicMock(return_value=[])
+        
+        strategy = StraddleStrategy(self.connector, MagicMock(), "XAUUSD", None, 20, 50, self.logger)
+        strategy._handle_active_positions(positions)
+        
+        self.connector.modify_position.assert_not_called()
+        print("Verified: SL did NOT move backward when price dropped.")
+
 if __name__ == "__main__":
     unittest.main()
