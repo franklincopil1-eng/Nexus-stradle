@@ -5,6 +5,9 @@ import MetaTrader5 as mt5
 from logger import setup_logger
 from mt5_connector import MT5Connector
 from oanda_connector import OandaConnector
+from exness_connector import ExnessConnector
+from valetax_connector import ValetaxConnector
+from pepperstone_connector import PepperstoneConnector
 from risk_manager import RiskManager
 from strategy import StraddleStrategy
 
@@ -48,9 +51,39 @@ def main():
 
     # Initialize specific MT5 Brokers
     add_mt5_broker("MT5", "Primary MT5")
-    add_mt5_broker("EXNESS", "Exness Kenya")
-    add_mt5_broker("VALETAX", "Valetax")
-    add_mt5_broker("PEPPERSTONE", "Pepperstone Kenya")
+    
+    # Exness Kenya
+    if os.getenv("EXNESS_LOGIN"):
+        exness = ExnessConnector(
+            login=os.getenv("EXNESS_LOGIN"),
+            password=os.getenv("EXNESS_PASSWORD"),
+            server=os.getenv("EXNESS_SERVER"),
+            logger=logger,
+            api_url=os.getenv("API_URL")
+        )
+        if exness.connect(): brokers.append(exness)
+
+    # Valetax
+    if os.getenv("VALETAX_LOGIN"):
+        valetax = ValetaxConnector(
+            login=os.getenv("VALETAX_LOGIN"),
+            password=os.getenv("VALETAX_PASSWORD"),
+            server=os.getenv("VALETAX_SERVER"),
+            logger=logger,
+            api_url=os.getenv("API_URL")
+        )
+        if valetax.connect(): brokers.append(valetax)
+
+    # Pepperstone
+    if os.getenv("PEPPERSTONE_LOGIN"):
+        pepperstone = PepperstoneConnector(
+            login=os.getenv("PEPPERSTONE_LOGIN"),
+            password=os.getenv("PEPPERSTONE_PASSWORD"),
+            server=os.getenv("PEPPERSTONE_SERVER"),
+            logger=logger,
+            api_url=os.getenv("API_URL")
+        )
+        if pepperstone.connect(): brokers.append(pepperstone)
 
     # Initialize OANDA if credentials exist
     if os.getenv("OANDA_ACCESS_TOKEN"):
