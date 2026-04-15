@@ -1,6 +1,6 @@
 {
-  "name": "XAUUSD MT5 Trading MVP",
-  "description": "An execution-first algorithmic trading system for XAUUSD integrating with MetaTrader 5, featuring a straddle strategy and automated risk management.",
+  "name": "ATLAS-X Multi-Broker Engine",
+  "description": "A high-performance algorithmic trading system for XAUUSD integrating Exness, Valetax, Pepperstone, and OANDA with real-time multi-account monitoring.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }

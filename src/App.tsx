@@ -37,6 +37,7 @@ export default function App() {
     marginFree: 0,
     floatingPL: 0
   });
+  const [brokers, setBrokers] = useState<any[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connectedBrokers, setConnectedBrokers] = useState<string[]>([]);
@@ -55,6 +56,7 @@ export default function App() {
         setRiskSettings(data.riskSettings);
         setSystemStatus(data.systemStatus);
         setAccount(data.account);
+        setBrokers(data.brokers || []);
         setOrders(data.orders);
         setLogs(data.logs);
         
@@ -174,6 +176,31 @@ export default function App() {
                   ${account.floatingPL.toLocaleString()}
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="section-title">Broker Breakdown</h3>
+            <div className="space-y-2">
+              {brokers.map((b) => (
+                <div key={b.name} className="p-2.5 bg-[#151518] border border-[#27272a] rounded flex justify-between items-center">
+                  <div>
+                    <div className="text-[10px] text-[#71717a] uppercase tracking-wider">{b.name}</div>
+                    <div className="text-sm font-mono font-bold">${b.equity.toLocaleString()}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-[10px] uppercase tracking-wider ${b.profit >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
+                      {b.profit >= 0 ? '+' : ''}${b.profit.toLocaleString()}
+                    </div>
+                    <div className="text-[9px] text-[#22c55e]">CONNECTED</div>
+                  </div>
+                </div>
+              ))}
+              {brokers.length === 0 && (
+                <div className="text-center py-4 text-[#71717a] text-xs italic">
+                  No brokers connected
+                </div>
+              )}
             </div>
           </div>
         </section>

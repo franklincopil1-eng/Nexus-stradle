@@ -165,6 +165,7 @@ def main():
             total_profit = 0
             total_balance = 0
             total_margin_free = 0
+            broker_stats = []
             
             primary_tick = brokers[0].get_tick(SYMBOL)
             spread = (primary_tick["ask"] - primary_tick["bid"]) * 100 if primary_tick else 0 # in points
@@ -184,6 +185,14 @@ def main():
                     total_equity += acc["equity"]
                     total_margin_free += acc["marginFree"]
                     total_profit += acc["floatingPL"]
+                    
+                    broker_stats.append({
+                        "name": broker.name,
+                        "balance": acc["balance"],
+                        "equity": acc["equity"],
+                        "profit": acc["floatingPL"],
+                        "status": "CONNECTED"
+                    })
                 
                 for p in positions:
                     all_orders.append({**p, "ticket": f"{broker.name[:3]}_{p['ticket']}", "status": "OPEN"})
@@ -209,6 +218,7 @@ def main():
                     "marginFree": total_margin_free,
                     "floatingPL": total_profit
                 },
+                "brokers": broker_stats,
                 "orders": all_orders
             })
 
