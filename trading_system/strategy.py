@@ -3,11 +3,12 @@ from datetime import datetime, timedelta
 from event_logger import trade_logger
 
 class StraddleStrategy:
-    def __init__(self, connector, risk_manager, symbol, timeframe, lookback_candles, offset_points, logger):
+    def __init__(self, connector, risk_manager, symbol, timeframe, htf_timeframe, lookback_candles, offset_points, logger):
         self.connector = connector
         self.risk_manager = risk_manager
         self.symbol = "XAUUSDm" # HARD WIRED SYMBOL
         self.timeframe = timeframe
+        self.htf_timeframe = htf_timeframe
         self.lookback_candles = lookback_candles
         self.offset_points = offset_points
         self.logger = logger
@@ -105,6 +106,15 @@ class StraddleStrategy:
         if not tick or not info:
             return
 
+        # Fetch HTF Data (15 min) for Liquidity/Resistance
+        htf_df = self.connector.get_historical_data(self.symbol, self.htf_timeframe, 2)
+        htf_resistance = None
+        htf_liquidity = None
+        if htf_df is not None and len(htf_df) >= 2:
+            # Use the previous 15m candle's High/Low as key zones
+            htf_resistance = htf_df.iloc[-2]['high']
+            htf_liquidity = htf_df.iloc[-2]['low']
+
         point = info.point
         be_trigger = 100 # points
         ts_start = 150   # points
@@ -134,13 +144,20 @@ class StraddleStrategy:
                 current_price = tick.bid
                 profit_points = (current_price - entry_price) / point
                 
-                # Trailing Logic
-                if profit_points >= ts_start:
+                # HTF Trailing Logic: If price is above HTF resistance, trail to HTF liquidity
+                if htf_liquidity and current_price > htf_resistance:
+                    potential_sl = htf_liquidity - (10 * point) # 10 point buffer
+                    if potential_sl > current_sl + (10 * point):
+                        new_sl = potential_sl
+                        log_msg = "HTF Trailing Stop Updated (Liquidity Zone)"
+                
+                # Standard Trailing Logic
+                elif profit_points >= ts_start:
                     potential_sl = current_price - (ts_step * point)
                     # Only update if it improves SL and is meaningful (>10 points)
                     if potential_sl > current_sl + (10 * point):
                         new_sl = potential_sl
-                        log_msg = "Trailing Stop Updated"
+                        log_msg = "Standard Trailing Stop Updated"
                 
                 # Break Even Logic
                 elif profit_points >= be_trigger:
@@ -152,13 +169,20 @@ class StraddleStrategy:
                 current_price = tick.ask
                 profit_points = (entry_price - current_price) / point
                 
-                # Trailing Logic
-                if profit_points >= ts_start:
+                # HTF Trailing Logic: If price is below HTF liquidity, trail to HTF resistance
+                if htf_resistance and current_price < htf_liquidity:
+                    potential_sl = htf_resistance + (10 * point) # 10 point buffer
+                    if current_sl == 0 or potential_sl < current_sl - (10 * point):
+                        new_sl = potential_sl
+                        log_msg = "HTF Trailing Stop Updated (Resistance Zone)"
+                
+                # Standard Trailing Logic
+                elif profit_points >= ts_start:
                     potential_sl = current_price + (ts_step * point)
                     # Only update if it improves SL (lower for SELL) and is meaningful
                     if current_sl == 0 or potential_sl < current_sl - (10 * point):
                         new_sl = potential_sl
-                        log_msg = "Trailing Stop Updated"
+                        log_msg = "Standard Trailing Stop Updated"
                 
                 # Break Even Logic
                 elif profit_points >= be_trigger:

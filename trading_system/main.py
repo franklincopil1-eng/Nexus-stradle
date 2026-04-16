@@ -16,7 +16,8 @@ load_dotenv()
 
 # Configuration
 SYMBOL = "XAUUSDm"
-TIMEFRAME = mt5.TIMEFRAME_M5
+TIMEFRAME = mt5.TIMEFRAME_M1 # Primary timeframe: 1 min
+HTF_TIMEFRAME = mt5.TIMEFRAME_M15 # Higher timeframe: 15 min
 LOOKBACK_CANDLES = 12 
 OFFSET_POINTS = 50
 FIXED_LOT = 0.01
@@ -120,6 +121,7 @@ def main():
             risk_manager=risk_manager,
             symbol=SYMBOL,
             timeframe=TIMEFRAME,
+            htf_timeframe=HTF_TIMEFRAME, # Pass HTF
             lookback_candles=LOOKBACK_CANDLES,
             offset_points=OFFSET_POINTS,
             logger=logger
