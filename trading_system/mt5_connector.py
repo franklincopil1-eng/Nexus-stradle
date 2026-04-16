@@ -379,5 +379,37 @@ class MT5Connector(Broker):
         self.logger.error(f"[{self.name}] CRITICAL: All {retries} attempts failed for {symbol}")
         return None
 
+    def get_closed_trade_details(self, ticket):
+        """Fetch historical data for a closed position"""
+        from datetime import datetime
+        
+        # Look for deals associated with this position
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals or len(deals) < 2:
+            return None
+            
+        entry_deal = None
+        exit_deal = None
+        
+        for d in deals:
+            if d.entry == mt5.DEAL_ENTRY_IN:
+                entry_deal = d
+            elif d.entry == mt5.DEAL_ENTRY_OUT:
+                exit_deal = d
+                
+        if not entry_deal or not exit_deal:
+            return None
+            
+        return {
+            "ticket": f"{self.name[:3]}_{ticket}",
+            "type": "BUY" if entry_deal.type == mt5.DEAL_TYPE_BUY else "SELL",
+            "volume": str(entry_deal.volume),
+            "entryPrice": entry_deal.price,
+            "exitPrice": exit_deal.price,
+            "pnl": round(entry_deal.profit + exit_deal.profit + exit_deal.commission + exit_deal.swap, 2),
+            "timeEntry": datetime.fromtimestamp(entry_deal.time).strftime('%H:%M:%S'),
+            "timeExit": datetime.fromtimestamp(exit_deal.time).strftime('%H:%M:%S')
+        }
+
     def shutdown(self):
         mt5.shutdown()

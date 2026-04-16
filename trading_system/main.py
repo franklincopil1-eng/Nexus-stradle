@@ -132,6 +132,7 @@ def main():
         ))
 
     is_halted = False
+    active_positions = {b.name: set() for b in brokers}
 
     try:
         while True:
@@ -187,6 +188,18 @@ def main():
                 positions = broker.get_positions(SYMBOL)
                 orders = broker.get_pending_orders(SYMBOL)
                 
+                # Check for closed positions
+                current_pids = {p["ticket"] for p in positions}
+                closed_pids = active_positions.get(broker.name, set()) - current_pids
+                for pid in closed_pids:
+                    if hasattr(broker, 'get_closed_trade_details'):
+                        details = broker.get_closed_trade_details(pid)
+                        if details:
+                            logger.info(f"Pushing closed trade to history: {pid}")
+                            broker.push_to_api({"history": details})
+                
+                active_positions[broker.name] = current_pids
+
                 if acc:
                     total_balance += acc["balance"]
                     total_equity += acc["equity"]

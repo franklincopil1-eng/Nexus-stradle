@@ -41,6 +41,7 @@ async function startServer() {
     },
     brokers: [] as any[],
     orders: [],
+    history: [] as any[],
     logs: [
       { timestamp: new Date().toLocaleTimeString(), level: 'INFO', message: 'API Server Started. Waiting for MT5 connection...' }
     ],
@@ -87,7 +88,7 @@ async function startServer() {
   });
 
   app.post("/api/update", (req, res) => {
-    const { price, spread, rangeHigh, rangeLow, riskSettings, account, brokers, orders, log } = req.body;
+    const { price, spread, rangeHigh, rangeLow, riskSettings, account, brokers, orders, history, log } = req.body;
     
     if (price !== undefined) tradingState.price = price;
     if (spread !== undefined) tradingState.spread = spread;
@@ -97,6 +98,15 @@ async function startServer() {
     if (account) tradingState.account = account;
     if (brokers) tradingState.brokers = brokers;
     if (orders) tradingState.orders = orders;
+    
+    if (history) {
+      if (Array.isArray(history)) {
+        tradingState.history = [...history, ...tradingState.history].slice(0, 100);
+      } else {
+        tradingState.history = [history, ...tradingState.history].slice(0, 100);
+      }
+    }
+
     if (log) {
       tradingState.logs.push({
         timestamp: new Date().toLocaleTimeString(),

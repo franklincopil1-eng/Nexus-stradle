@@ -18,6 +18,17 @@ interface Order {
   status: 'PENDING' | 'OPEN';
 }
 
+interface HistoryEntry {
+  ticket: string;
+  type: string;
+  volume: string;
+  entryPrice: number;
+  exitPrice: number;
+  pnl: number;
+  timeEntry: string;
+  timeExit: string;
+}
+
 export default function App() {
   const [price, setPrice] = useState(0);
   const [spread, setSpread] = useState(0);
@@ -39,7 +50,9 @@ export default function App() {
   });
   const [brokers, setBrokers] = useState<any[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<'pipeline' | 'history'>('pipeline');
   const [connectedBrokers, setConnectedBrokers] = useState<string[]>([]);
   const [isApiConnected, setIsApiConnected] = useState<boolean>(true);
   const [errorCount, setErrorCount] = useState(0);
@@ -76,6 +89,7 @@ export default function App() {
           if (data.account) setAccount(data.account);
           setBrokers(data.brokers || []);
           setOrders(data.orders || []);
+          setHistory(data.history || []);
           setLogs(data.logs || []);
           
           if (Array.isArray(data.logs)) {
@@ -263,38 +277,107 @@ export default function App() {
         </section>
 
         {/* Center Pane: Execution Pipeline */}
-        <section className="pane border-x border-[#27272a]">
-          <h3 className="section-title">Live Execution Pipeline</h3>
-          <table className="w-full border-collapse order-table">
-            <thead>
-              <tr>
-                <th>Ticket</th>
-                <th>Type</th>
-                <th>Volume</th>
-                <th>Entry/Price</th>
-                <th>S/L</th>
-                <th>T/P</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order, idx) => (
-                <tr key={order.ticket} className={order.status === 'OPEN' ? 'bg-white/5' : ''}>
-                  <td>{order.ticket}</td>
-                  <td>
-                    <span className={`badge ${order.type.includes('BUY') ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]'}`}>
-                      {order.type}
-                    </span>
-                  </td>
-                  <td>{order.volume}</td>
-                  <td>{order.price}</td>
-                  <td>{order.sl}</td>
-                  <td>{order.tp}</td>
-                  <td className={order.status === 'OPEN' ? 'text-[#22c55e]' : ''}>{order.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <section className="pane border-x border-[#27272a] overflow-hidden flex flex-col">
+          <div className="flex items-center gap-6 mb-4 px-2">
+            <button 
+              onClick={() => setActiveTab('pipeline')}
+              className={`text-[11px] uppercase tracking-[2px] font-bold pb-1 border-b-2 transition-all ${
+                activeTab === 'pipeline' ? 'border-[#22c55e] text-[#22c55e]' : 'border-transparent text-[#71717a]'
+              }`}
+            >
+              Execution Pipeline
+            </button>
+            <button 
+              onClick={() => setActiveTab('history')}
+              className={`text-[11px] uppercase tracking-[2px] font-bold pb-1 border-b-2 transition-all ${
+                activeTab === 'history' ? 'border-[#22c55e] text-[#22c55e]' : 'border-transparent text-[#71717a]'
+              }`}
+            >
+              Trade History
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            {activeTab === 'pipeline' ? (
+              <table className="w-full border-collapse order-table">
+                <thead>
+                  <tr>
+                    <th>Ticket</th>
+                    <th>Type</th>
+                    <th>Volume</th>
+                    <th>Entry/Price</th>
+                    <th>S/L</th>
+                    <th>T/P</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map((order, idx) => (
+                    <tr key={order.ticket} className={order.status === 'OPEN' ? 'bg-white/5' : ''}>
+                      <td>{order.ticket}</td>
+                      <td>
+                        <span className={`badge ${order.type.includes('BUY') ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]'}`}>
+                          {order.type}
+                        </span>
+                      </td>
+                      <td>{order.volume}</td>
+                      <td>{order.price}</td>
+                      <td>{order.sl}</td>
+                      <td>{order.tp}</td>
+                      <td className={order.status === 'OPEN' ? 'text-[#22c55e]' : ''}>{order.status}</td>
+                    </tr>
+                  ))}
+                  {orders.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-20 text-[#71717a] text-xs italic opacity-50">
+                        No active orders or positions
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full border-collapse order-table">
+                <thead>
+                  <tr>
+                    <th>Ticket</th>
+                    <th>Type</th>
+                    <th>Volume</th>
+                    <th>Entry</th>
+                    <th>Exit</th>
+                    <th>Net P/L</th>
+                    <th>Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((entry, idx) => (
+                    <tr key={entry.ticket} className="border-b border-[#27272a]/50">
+                      <td className="font-mono text-[10px] text-[#71717a]">{entry.ticket}</td>
+                      <td>
+                        <span className={`badge ${entry.type === 'BUY' ? 'bg-[#22c55e]/10 text-[#22c55e]' : 'bg-[#ef4444]/10 text-[#ef4444]'}`}>
+                          {entry.type}
+                        </span>
+                      </td>
+                      <td className="font-mono">{entry.volume}</td>
+                      <td className="font-mono text-[#71717a]">{Number(entry.entryPrice).toFixed(2)}</td>
+                      <td className="font-mono text-[#71717a]">{Number(entry.exitPrice).toFixed(2)}</td>
+                      <td className={`font-mono font-bold ${entry.pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
+                        {entry.pnl >= 0 ? '+' : ''}{Number(entry.pnl).toFixed(2)}
+                      </td>
+                      <td className="text-[10px] text-[#71717a]">{entry.timeExit}</td>
+                    </tr>
+                  ))}
+                  {history.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="text-center py-20 text-[#71717a] text-xs italic opacity-50">
+                        Historical data storage empty
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
         </section>
 
         {/* Right Pane: Risk & Strategy */}
