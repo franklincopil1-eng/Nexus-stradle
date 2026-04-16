@@ -42,6 +42,12 @@ class MT5Connector(Broker):
             self.push_to_api({"log": {"level": "ERROR", "message": f"MT5 Init Failed: {err}"}})
             return False
         
+        # Ensure symbol is selected
+        symbol = "XAUUSDm"
+        if not mt5.symbol_select(symbol, True):
+            self.logger.error(f"Failed to select symbol {symbol}")
+            return False
+
         account_info = mt5.account_info()
         if account_info is None:
             self.logger.error("Failed to get account info")
@@ -119,6 +125,7 @@ class MT5Connector(Broker):
         if sl: request["sl"] = sl
         if tp: request["tp"] = tp
 
+        print("📡 Sending REAL MT5 order")
         start_time = time.time()
         result = mt5.order_send(request)
         execution_delay = time.time() - start_time
@@ -135,6 +142,8 @@ class MT5Connector(Broker):
             self.push_to_api({"log": {"level": "ERROR", "message": err_msg}})
             return None
 
+        print("✅ MT5 confirmed execution")
+        print(f"📄 Ticket: {result.order}")
         return result.order
 
     def cancel_order(self, ticket):
@@ -342,8 +351,10 @@ class MT5Connector(Broker):
                     self.push_to_api({"log": {"level": "EXECUTION", "message": success_msg}})
                     return order_id
                 else:
+                    print("❌ ORDER FAILED (Verification)")
                     self.logger.error(f"[{self.name}] Order #{order_id} placed but NOT found in book. Retrying...")
             else:
+                print("❌ ORDER FAILED")
                 trade_logger.log_event(symbol, "ORDER_REJECTED", expected_price=n_price, details=f"Retcode: {mt5.last_error()}")
             
             time.sleep(1) # Safety delay between retries

@@ -15,7 +15,7 @@ from strategy import StraddleStrategy
 load_dotenv()
 
 # Configuration
-SYMBOL = "XAUUSD"
+SYMBOL = "XAUUSDm"
 TIMEFRAME = mt5.TIMEFRAME_M5
 LOOKBACK_CANDLES = 12 
 OFFSET_POINTS = 50
@@ -23,7 +23,7 @@ FIXED_LOT = 0.01
 SL_POINTS = 200
 TP_POINTS = 400
 TRAILING_STOP_POINTS = 150
-ITERATION_SLEEP = 60 
+ITERATION_SLEEP = 5 
 
 def main():
     logger = setup_logger()
@@ -129,6 +129,7 @@ def main():
 
     try:
         while True:
+            print("\n🚀 LOOP START")
             logger.info(f"Running iteration at {time.strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Use the first broker for UI commands and global state for now
@@ -225,8 +226,10 @@ def main():
             # Run strategies
             if not is_halted:
                 for strat in strategies:
+                    print("📊 Running strategy iteration")
                     strat.run_iteration()
             
+            print("✅ Loop complete")
             time.sleep(ITERATION_SLEEP)
             
     except KeyboardInterrupt:

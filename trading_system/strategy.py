@@ -6,12 +6,13 @@ class StraddleStrategy:
     def __init__(self, connector, risk_manager, symbol, timeframe, lookback_candles, offset_points, logger):
         self.connector = connector
         self.risk_manager = risk_manager
-        self.symbol = symbol
+        self.symbol = "XAUUSDm" # HARD WIRED SYMBOL
         self.timeframe = timeframe
         self.lookback_candles = lookback_candles
         self.offset_points = offset_points
         self.logger = logger
         self.active_tickets = set() # Track active tickets for exit detection
+        self.has_placed_first_trade = False # FORCE FIRST TRADE FLAG
 
     def run_iteration(self):
         # 1. Get state
@@ -23,7 +24,11 @@ class StraddleStrategy:
             self._handle_active_positions(positions)
             return
             
-        if state != "NO_STRADDLE":
+        # FORCE FIRST TRADE LOGIC
+        if not self.has_placed_first_trade:
+            print("🔥 LIVE TRADE TEST TRIGGERED")
+            print("📢 SIGNAL GENERATED (FORCED FIRST TRADE)")
+        elif state != "NO_STRADDLE":
             return
 
         # 3. Calculate straddle prices
@@ -33,10 +38,13 @@ class StraddleStrategy:
         if not prices:
             return
         buy_stop_price, sell_stop_price = prices
+        
+        if self.has_placed_first_trade:
+            print("📢 SIGNAL GENERATED")
 
         # 5. Place: Buy Stop, Sell Stop
         acc = self.connector.get_account_info()
-        lot = self.risk_manager.calculate_lot(acc)
+        lot = 0.01 # HARD LIMIT LOT SIZE
         
         # Calculate SL/TP
         sl_buy = round(buy_stop_price - (200 * 0.01), 2)
@@ -49,9 +57,13 @@ class StraddleStrategy:
         order_type_buy = mt5.ORDER_TYPE_BUY_STOP if is_mt5 else "BUY_STOP"
         order_type_sell = mt5.ORDER_TYPE_SELL_STOP if is_mt5 else "SELL_STOP"
 
+        print("🚀 SENDING ORDER TO MT5")
         self.logger.info(f"[{self.connector.name}] Placing clean straddle at {buy_stop_price} / {sell_stop_price}")
+        
         self.connector.execute_order_with_retry(self.symbol, order_type_buy, lot, buy_stop_price, sl_buy, tp_buy, "Straddle Buy")
         self.connector.execute_order_with_retry(self.symbol, order_type_sell, lot, sell_stop_price, sl_sell, tp_sell, "Straddle Sell")
+        
+        self.has_placed_first_trade = True
 
     def _handle_active_positions(self, positions):
         # 0. Detect Exits (SL/TP)
