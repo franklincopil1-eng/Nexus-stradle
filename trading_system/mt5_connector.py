@@ -35,19 +35,36 @@ class MT5Connector(Broker):
             pass
         return []
 
-    def connect(self):
+    def connect(self, base_symbol="XAUUSD"):
         if not mt5.initialize(login=self.login, password=self.password, server=self.server):
             err = mt5.last_error()
             self.logger.error("MT5 initialization failed", extra_data={"error": err})
             self.push_to_api({"log": {"level": "ERROR", "message": f"MT5 Init Failed: {err}"}})
             return False
         
-        # Ensure symbol is selected
-        symbol = "XAUUSDm"
-        if not mt5.symbol_select(symbol, True):
-            self.logger.error(f"Failed to select symbol {symbol}")
+        # Dynamic Symbol Selection
+        selected_symbol = None
+        
+        # Try exact match first
+        if mt5.symbol_select(base_symbol, True):
+            selected_symbol = base_symbol
+        else:
+            # Scan for alternatives
+            all_symbols = mt5.symbols_get()
+            alternatives = [s.name for s in all_symbols if base_symbol in s.name]
+            if alternatives:
+                self.logger.info(f"Symbol {base_symbol} not found. Scanning alternatives: {alternatives}")
+                for alt in alternatives:
+                    if mt5.symbol_select(alt, True):
+                        selected_symbol = alt
+                        self.logger.info(f"Selected alternative symbol: {selected_symbol}")
+                        break
+        
+        if not selected_symbol:
+            self.logger.error(f"Failed to find or select symbol {base_symbol} or its alternatives.")
             return False
-
+        
+        self.symbol = selected_symbol # Store the resolved symbol
         account_info = mt5.account_info()
         if account_info is None:
             self.logger.error("Failed to get account info")

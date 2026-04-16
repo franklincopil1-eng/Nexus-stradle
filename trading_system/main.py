@@ -45,8 +45,12 @@ def main():
             )
             # Set a custom name for the broker instance
             broker.name = name
-            if broker.connect():
+            if broker.connect(SYMBOL):
                 brokers.append(broker)
+                # Update global SYMBOL to the resolved one if it's the primary broker
+                if name == "Primary MT5":
+                    global SYMBOL
+                    SYMBOL = broker.symbol
             else:
                 logger.warning(f"{name} connection failed, skipping.")
 
@@ -62,7 +66,7 @@ def main():
             logger=logger,
             api_url=os.getenv("API_URL")
         )
-        if exness.connect(): brokers.append(exness)
+        if exness.connect(SYMBOL): brokers.append(exness)
 
     # Valetax
     if os.getenv("VALETAX_LOGIN"):
@@ -73,7 +77,7 @@ def main():
             logger=logger,
             api_url=os.getenv("API_URL")
         )
-        if valetax.connect(): brokers.append(valetax)
+        if valetax.connect(SYMBOL): brokers.append(valetax)
 
     # Pepperstone
     if os.getenv("PEPPERSTONE_LOGIN"):
@@ -84,7 +88,7 @@ def main():
             logger=logger,
             api_url=os.getenv("API_URL")
         )
-        if pepperstone.connect(): brokers.append(pepperstone)
+        if pepperstone.connect(SYMBOL): brokers.append(pepperstone)
 
     # Initialize OANDA if credentials exist
     if os.getenv("OANDA_ACCESS_TOKEN"):
@@ -95,7 +99,7 @@ def main():
             logger=logger,
             api_url=os.getenv("API_URL")
         )
-        if oanda_broker.connect():
+        if oanda_broker.connect(SYMBOL):
             brokers.append(oanda_broker)
         else:
             logger.warning("OANDA connection failed, skipping.")

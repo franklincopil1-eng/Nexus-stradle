@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 class TradeEventLogger:
-    def __init__(self, log_file="/logs/trade_events.jsonl"):
+    def __init__(self, log_file="logs/trade_events.jsonl"):
         self.log_file = log_file
         os.makedirs(os.path.dirname(self.log_file), exist_ok=True)
 

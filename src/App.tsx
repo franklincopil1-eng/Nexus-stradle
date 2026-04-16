@@ -41,43 +41,76 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connectedBrokers, setConnectedBrokers] = useState<string[]>([]);
+  const [isApiConnected, setIsApiConnected] = useState<boolean>(true);
+  const [errorCount, setErrorCount] = useState(0);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchState = async () => {
+      const url = `${window.location.origin}/api/state`;
       try {
-        const res = await fetch('/api/state');
-        const data = await res.json();
-        setPrice(data.price);
-        setSpread(data.spread);
-        setRangeHigh(data.rangeHigh);
-        setRangeLow(data.rangeLow);
-        setRiskSettings(data.riskSettings);
-        setSystemStatus(data.systemStatus);
-        setAccount(data.account);
-        setBrokers(data.brokers || []);
-        setOrders(data.orders);
-        setLogs(data.logs);
-        
-        // Extract unique broker names from orders or logs if not explicitly provided
-        // For now, let's assume we can get them from the logs or just hardcode the ones we expect if they have logs
-        const brokers = new Set<string>();
-        data.logs.forEach((l: LogEntry) => {
-          if (l.message.includes("Connected to")) {
-            const match = l.message.match(/Connected to ([^:]+)/);
-            if (match) brokers.add(match[1]);
+        const res = await fetch(url, {
+          cache: 'no-store',
+          headers: {
+            'Accept': 'application/json'
           }
         });
-        setConnectedBrokers(Array.from(brokers));
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status} URL: ${url}`);
+        }
+        const data = await res.json();
+        if (isMounted && data) {
+          setIsApiConnected(true);
+          setErrorCount(0);
+          setIsInitialLoading(false);
+          setPrice(data.price ?? 0);
+          setSpread(data.spread ?? 0);
+          setRangeHigh(data.rangeHigh ?? 0);
+          setRangeLow(data.rangeLow ?? 0);
+          if (data.riskSettings) setRiskSettings(data.riskSettings);
+          if (data.systemStatus) setSystemStatus(data.systemStatus);
+          if (data.account) setAccount(data.account);
+          setBrokers(data.brokers || []);
+          setOrders(data.orders || []);
+          setLogs(data.logs || []);
+          
+          if (Array.isArray(data.logs)) {
+            const brokers = new Set<string>();
+            data.logs.forEach((l: LogEntry) => {
+              if (l && l.message && l.message.includes("Connected to")) {
+                const match = l.message.match(/Connected to ([^:]+)/);
+                if (match) brokers.add(match[1]);
+              }
+            });
+            setConnectedBrokers(Array.from(brokers));
+          }
+        }
       } catch (err) {
-        console.error("Failed to fetch state", err);
+        if (isMounted) {
+          setIsApiConnected(false);
+          setErrorCount(prev => prev + 1);
+          if (errorCount % 3 === 0) {
+            console.error("Fetch Error:", {
+              url,
+              message: err instanceof Error ? err.message : String(err),
+              time: new Date().toLocaleTimeString()
+            });
+          }
+        }
       }
     };
 
-    const interval = setInterval(fetchState, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    fetchState(); // Initial call
+    const interval = setInterval(fetchState, 1500); 
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [errorCount]);
 
   const sendCommand = async (command: string) => {
     try {
@@ -95,6 +128,24 @@ export default function App() {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  if (isInitialLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-[#0a0a0b] text-[#e2e2e4] font-mono">
+        <motion.div 
+          animate={{ opacity: [0.4, 1, 0.4] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="flex flex-col items-center gap-4"
+        >
+          <div className="text-2xl font-extrabold tracking-[4px]">ATLAS-X</div>
+          <div className="flex items-center gap-2 text-xs text-[#71717a]">
+            <div className="w-1.5 h-1.5 bg-[#22c55e] rounded-full animate-pulse" />
+            INITIALIZING EXECUTION ENGINE...
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#0a0a0b] text-[#e2e2e4]">
       {/* Header */}
@@ -104,6 +155,12 @@ export default function App() {
           <span className="text-[#71717a] font-light text-xs tracking-normal">// EXECUTION ENGINE</span>
         </div>
         <div className="flex gap-8">
+          {!isApiConnected && (
+            <div className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#ef4444] animate-pulse">
+              <AlertTriangle size={14} />
+              API DISCONNECTED
+            </div>
+          )}
           {connectedBrokers.map(broker => (
             <div key={broker} className="flex items-center gap-2 text-[12px] uppercase tracking-wider text-[#22c55e]">
               <div className="w-2 h-2 bg-[#22c55e] rounded-full shadow-[0_0_8px_#22c55e]" />

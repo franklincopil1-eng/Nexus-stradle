@@ -23,7 +23,7 @@ class OandaConnector(Broker):
         except Exception:
             pass
 
-    def connect(self):
+    def connect(self, base_symbol="XAUUSD"):
         try:
             hostname = 'api-fxtrade.oanda.com' if self.environment == 'live' else 'api-fxpractice.oanda.com'
             self.ctx = v20.Context(hostname, 443, True, application="trading_mvp", token=self.access_token)
@@ -34,6 +34,7 @@ class OandaConnector(Broker):
                 self.logger.error(f"OANDA connection failed: {response.body.get('errorMessage')}")
                 return False
             
+            self.symbol = base_symbol # Store base symbol
             self.logger.info(f"Connected to {self.name}: {self.account_id} ({self.environment})")
             self.push_to_api({
                 "log": {"level": "INFO", "message": f"Connected to {self.name}: {self.account_id}"},

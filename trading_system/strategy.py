@@ -6,7 +6,7 @@ class StraddleStrategy:
     def __init__(self, connector, risk_manager, symbol, timeframe, htf_timeframe, lookback_candles, offset_points, logger):
         self.connector = connector
         self.risk_manager = risk_manager
-        self.symbol = "XAUUSDm" # HARD WIRED SYMBOL
+        self.symbol = symbol
         self.timeframe = timeframe
         self.htf_timeframe = htf_timeframe
         self.lookback_candles = lookback_candles

@@ -6,8 +6,8 @@ class PepperstoneConnector(MT5Connector):
         super().__init__(login, password, server, logger, api_url)
         self.name = "Pepperstone"
 
-    def connect(self):
-        success = super().connect()
+    def connect(self, base_symbol="XAUUSD"):
+        success = super().connect(base_symbol)
         if success:
             self.logger.info(f"Connected to Pepperstone Kenya: {self.login}")
         return success
