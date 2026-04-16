@@ -66,6 +66,9 @@ A high-fidelity, execution-first algorithmic trading system for XAUUSD, featurin
    MT5_PASSWORD="password"
    MT5_SERVER="Exness-MT5Trial"
    SYMBOL="XAUUSDm"
+   
+   # Important: Link to your cloud dashboard
+   API_URL="https://ais-dev-udk65hnd4gccc7nd7xsj6h-688925601810.europe-west2.run.app"
    ```
 3. Run the system:
    ```bash

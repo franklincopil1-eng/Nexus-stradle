@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 
 class TradeIntelligenceEngine:
-    def __init__(self, log_file="/logs/trade_events.jsonl"):
+    def __init__(self, log_file="logs/trade_events.jsonl"):
         self.log_file = log_file
 
     def load_events(self):
