@@ -15,7 +15,7 @@ from strategy import StraddleStrategy
 load_dotenv()
 
 # Configuration
-SYMBOL = "XAUUSDm"
+SYMBOL = os.getenv("TRADING_SYMBOL", "XAUUSD")
 TIMEFRAME = mt5.TIMEFRAME_M1 # Primary timeframe: 1 min
 M5_TIMEFRAME = mt5.TIMEFRAME_M5
 HTF_TIMEFRAME = mt5.TIMEFRAME_M15 # Higher timeframe: 15 min
@@ -29,7 +29,8 @@ TRAILING_STOP_POINTS = 150
 ITERATION_SLEEP = 5 
 
 def main():
-    logger = setup_logger()
+    api_url = os.getenv("API_URL")
+    logger = setup_logger(api_url=api_url)
     logger.info("Starting Atlas-X Straddle Engine v2")
 
     brokers = []
@@ -224,10 +225,12 @@ def main():
 
             # Push aggregate state to API
             primary_broker.push_to_api({
+                "symbol": SYMBOL,
                 "price": primary_tick["bid"] if primary_tick else 0,
                 "spread": round(spread, 1),
                 "rangeHigh": range_high,
                 "rangeLow": range_low,
+                "systemStatus": "HALTED" if is_halted else "ENGAGED",
                 "riskSettings": {
                     "fixedLot": FIXED_LOT,
                     "slPoints": SL_POINTS,

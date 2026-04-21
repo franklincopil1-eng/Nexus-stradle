@@ -3,9 +3,19 @@ import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import { initializeApp } from "firebase/app";
+import { initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, limit, getDocs, onSnapshot } from "firebase/firestore";
+import fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Firebase Setup
+const firebaseConfig = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'firebase-applet-config.json'), 'utf8'));
+const firebaseApp = initializeApp(firebaseConfig);
+const db = initializeFirestore(firebaseApp, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
 
 async function startServer() {
   const app = express();
@@ -45,8 +55,34 @@ async function startServer() {
     logs: [
       { timestamp: new Date().toLocaleTimeString(), level: 'INFO', message: 'API Server Started. Waiting for MT5 connection...' }
     ],
+    backtestResult: null as any,
+    lastHeartbeat: 0,
     commands: [] as string[]
   };
+
+  // Initialize state from Firestore
+  try {
+    const stateDoc = await getDoc(doc(db, "system", "state"));
+    if (stateDoc.exists()) {
+      const data = stateDoc.data();
+      tradingState = { ...tradingState, ...data };
+      console.log("✅ Trading state restored from Firestore");
+    }
+
+    const backtestDoc = await getDoc(doc(db, "system", "backtest"));
+    if (backtestDoc.exists()) {
+      tradingState.backtestResult = backtestDoc.data();
+    }
+
+    // Load recent logs
+    const logsSnap = await getDocs(query(collection(db, "logs"), orderBy("timestamp", "desc"), limit(50)));
+    tradingState.logs = logsSnap.docs.map(d => d.data() as any).reverse();
+
+    // Load recent history (simulated from logs or separate collection if you want)
+    // For now we keep history in memory or load if we added a collection
+  } catch (err) {
+    console.error("❌ Failed to initialize from Firebase:", err);
+  }
 
   // API Routes
   app.get("/api/health", (req, res) => {
@@ -55,7 +91,12 @@ async function startServer() {
 
   app.get("/api/state", (req, res) => {
     try {
-      res.json(tradingState);
+      const now = Date.now();
+      const isBridgeActive = (now - tradingState.lastHeartbeat) < 30000; // 30s timeout
+      res.json({ 
+        ...tradingState, 
+        bridgeActive: isBridgeActive && tradingState.lastHeartbeat > 0 
+      });
     } catch (err) {
       console.error("Error serving /api/state:", err);
       res.status(500).json({ error: "Internal server error" });
@@ -87,15 +128,45 @@ async function startServer() {
     res.json({ commands });
   });
 
-  app.post("/api/update", (req, res) => {
-    const { price, spread, rangeHigh, rangeLow, riskSettings, account, brokers, orders, history, log } = req.body;
+  app.post("/api/update", async (req, res) => {
+    const { price, spread, rangeHigh, rangeLow, riskSettings, account, brokers, orders, history, log, backtest } = req.body;
     
-    if (price !== undefined) tradingState.price = price;
-    if (spread !== undefined) tradingState.spread = spread;
-    if (rangeHigh !== undefined) tradingState.rangeHigh = rangeHigh;
-    if (rangeLow !== undefined) tradingState.rangeLow = rangeLow;
-    if (riskSettings) tradingState.riskSettings = riskSettings;
-    if (account) tradingState.account = account;
+    tradingState.lastHeartbeat = Date.now();
+
+    const stateUpdate: any = { lastHeartbeat: tradingState.lastHeartbeat };
+
+    if (price !== undefined) {
+      tradingState.price = price;
+      stateUpdate.price = price;
+    }
+    if (spread !== undefined) {
+      tradingState.spread = spread;
+      stateUpdate.spread = spread;
+    }
+    if (rangeHigh !== undefined) {
+      tradingState.rangeHigh = rangeHigh;
+      stateUpdate.rangeHigh = rangeHigh;
+    }
+    if (rangeLow !== undefined) {
+      tradingState.rangeLow = rangeLow;
+      stateUpdate.rangeLow = rangeLow;
+    }
+    if (riskSettings) {
+      tradingState.riskSettings = riskSettings;
+      stateUpdate.riskSettings = riskSettings;
+    }
+    if (account) {
+      tradingState.account = account;
+      stateUpdate.account = account;
+    }
+    
+    // Persistent update for the core state
+    try {
+      await setDoc(doc(db, "system", "state"), stateUpdate, { merge: true });
+    } catch (e) {
+      console.error("Firestore State Update Error:", e);
+    }
+
     if (brokers) tradingState.brokers = brokers;
     if (orders) tradingState.orders = orders;
     
@@ -107,14 +178,29 @@ async function startServer() {
       }
     }
 
-    if (log) {
+    if (backtest) {
+      tradingState.backtestResult = backtest;
       tradingState.logs.push({
         timestamp: new Date().toLocaleTimeString(),
-        ...log
+        level: 'SUCCESS',
+        message: 'New Backtest Results Uploaded to Dashboard'
       });
-      // Keep last 100 logs
-      if (tradingState.logs.length > 100) {
-        tradingState.logs.shift();
+      await setDoc(doc(db, "system", "backtest"), backtest);
+    }
+
+    if (log) {
+      const logEntry = {
+        timestamp: new Date().toLocaleTimeString(),
+        ...log
+      };
+      tradingState.logs.push(logEntry);
+      if (tradingState.logs.length > 100) tradingState.logs.shift();
+      
+      // Persist logs
+      try {
+        await addDoc(collection(db, "logs"), logEntry);
+      } catch (e) {
+        console.error("Firestore Log Error:", e);
       }
     }
     

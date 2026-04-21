@@ -1,0 +1,95 @@
+{
+  "entities": {
+    "TradingState": {
+      "title": "TradingState",
+      "description": "Real-time state of the trading system",
+      "type": "object",
+      "properties": {
+        "price": { "type": "number" },
+        "spread": { "type": "number" },
+        "rangeHigh": { "type": "number" },
+        "rangeLow": { "type": "number" },
+        "systemStatus": { "type": "string", "enum": ["ENGAGED", "HALTED"] },
+        "lastHeartbeat": { "type": "number" },
+        "riskSettings": {
+          "type": "object",
+          "properties": {
+            "fixedLot": { "type": "number" },
+            "slPoints": { "type": "number" },
+            "tpPoints": { "type": "number" },
+            "trailingStop": { "type": "number" },
+            "lookback": { "type": "number" }
+          }
+        },
+        "account": {
+          "type": "object",
+          "properties": {
+            "balance": { "type": "number" },
+            "equity": { "type": "number" },
+            "marginFree": { "type": "number" },
+            "floatingPL": { "type": "number" }
+          }
+        }
+      }
+    },
+    "Log": {
+      "title": "Log",
+      "description": "System log entry",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string" },
+        "level": { "type": "string", "enum": ["INFO", "STRATEGY", "EXECUTION", "ERROR", "SUCCESS"] },
+        "message": { "type": "string" }
+      },
+      "required": ["timestamp", "level", "message"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Active or pending order",
+      "type": "object",
+      "properties": {
+        "ticket": { "type": "string" },
+        "type": { "type": "string" },
+        "volume": { "type": "string" },
+        "price": { "type": "string" },
+        "sl": { "type": "string" },
+        "tp": { "type": "string" },
+        "status": { "type": "string" }
+      }
+    },
+    "BacktestResult": {
+      "title": "BacktestResult",
+      "description": "Results of the latest backtest",
+      "type": "object",
+      "properties": {
+        "win_rate": { "type": "number" },
+        "avg_rr": { "type": "number" },
+        "total_trades": { "type": "number" },
+        "total_pnl": { "type": "number" },
+        "equity_curve": { "type": "array", "items": { "type": "number" } }
+      }
+    }
+  },
+  "firestore": {
+    "/system/state": {
+      "schema": "TradingState",
+      "description": "The true state of the live engine"
+    },
+    "/system/backtest": {
+      "schema": "BacktestResult",
+      "description": "Latest backtest outcomes"
+    },
+    "/logs": {
+      "schema": "Log",
+      "description": "Stream of engine logs"
+    },
+    "/orders": {
+      "schema": "Order",
+      "description": "Active positions and pending limit orders"
+    },
+    "/commands": {
+      "schema": "object",
+      "description": "Control signals sent from the UI"
+    }
+  }
+}
