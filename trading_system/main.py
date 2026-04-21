@@ -17,18 +17,20 @@ load_dotenv()
 # Configuration
 SYMBOL = "XAUUSDm"
 TIMEFRAME = mt5.TIMEFRAME_M1 # Primary timeframe: 1 min
+M5_TIMEFRAME = mt5.TIMEFRAME_M5
 HTF_TIMEFRAME = mt5.TIMEFRAME_M15 # Higher timeframe: 15 min
 LOOKBACK_CANDLES = 12 
 OFFSET_POINTS = 50
-FIXED_LOT = 0.01
-SL_POINTS = 200
-TP_POINTS = 400
+FIXED_LOT = 0.1 # Max cap for auto lots
+MAX_RISK_PERCENT = 1.0 # 1% per trade
+SL_POINTS = 300
+TP_POINTS = 600
 TRAILING_STOP_POINTS = 150
 ITERATION_SLEEP = 5 
 
 def main():
     logger = setup_logger()
-    logger.info("Starting XAUUSD Trading MVP (Multi-Broker)")
+    logger.info("Starting Atlas-X Straddle Engine v2")
 
     brokers = []
 
@@ -111,6 +113,7 @@ def main():
     # Initialize Risk Manager
     risk_manager = RiskManager(
         fixed_lot=FIXED_LOT,
+        max_risk_percent=MAX_RISK_PERCENT,
         sl_points=SL_POINTS,
         tp_points=TP_POINTS,
         trailing_stop_points=TRAILING_STOP_POINTS,

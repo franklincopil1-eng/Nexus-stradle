@@ -38,6 +38,10 @@ class Broker(ABC):
         pass
 
     @abstractmethod
+    def close_position(self, ticket, symbol, volume=None):
+        pass
+
+    @abstractmethod
     def shutdown(self):
         pass
 

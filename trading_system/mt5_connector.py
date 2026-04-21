@@ -411,5 +411,30 @@ class MT5Connector(Broker):
             "timeExit": datetime.fromtimestamp(exit_deal.time).strftime('%H:%M:%S')
         }
 
+    def close_position(self, ticket, symbol, volume=None):
+        """Close a specific position. volume=None closes the whole position."""
+        pos = mt5.positions_get(ticket=ticket)
+        if not pos:
+            return False
+        
+        p = pos[0]
+        v = volume if volume else p.volume
+        
+        # In MT5 hedging mode, you just send an opposite order with the ticket reference
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": v,
+            "type": mt5.ORDER_TYPE_SELL if p.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY,
+            "position": ticket,
+            "magic": 123456,
+            "comment": "Partial Close" if volume else "Full Close",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        return result.retcode == mt5.TRADE_RETCODE_DONE
+
     def shutdown(self):
         mt5.shutdown()
